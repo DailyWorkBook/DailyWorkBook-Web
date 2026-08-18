@@ -2,22 +2,16 @@ import React, { useState } from 'react';
 import {
   ShieldAlert,
   UserCheck,
-  Search,
   ExternalLink,
   Lock,
-  Building2,
-  Phone,
-  Mail,
-  Calendar,
-  CheckCircle2,
+  Search,
   AlertTriangle,
   Clock,
-  Terminal,
   ShieldCheck,
-  Zap,
-  ArrowRight
+  Building2,
+  KeyRound
 } from 'lucide-react';
-import { SuperAdminClient, BypassAuditLog } from '../types';
+import type { SuperAdminClient, BypassAuditLog } from '../types';
 
 interface SuperAdminControlTabProps {
   clients: SuperAdminClient[];
@@ -30,7 +24,9 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
   bypassLogs,
   onInitiateBypassInNewTab
 }) => {
-  const [selectedClientId, setSelectedClientId] = useState<string>(clients[0]?.id || '');
+  const [selectedClientId, setSelectedClientId] = useState<string>(
+    clients.length > 0 ? clients[0].id : ''
+  );
   const [searchQuery, setSearchQuery] = useState('');
   const [accessReason, setAccessReason] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -39,79 +35,73 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
 
   const filteredClients = clients.filter(
     (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.adminAccount.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.adminAccount.email.toLowerCase().includes(searchQuery.toLowerCase())
+      (c.companyName || c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.clientCode || c.code || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.adminAccount?.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.adminAccount?.email || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleLaunchNewTab = (e: React.FormEvent) => {
     e.preventDefault();
     if (!accessReason.trim()) {
-      setErrorMsg('Mandatory: Please specify a reason for logging into this Admin account.');
+      setErrorMsg('Please enter a valid reason for accessing this client admin account.');
       return;
     }
     setErrorMsg('');
-    onInitiateBypassInNewTab(selectedClient, accessReason.trim());
-    setAccessReason('');
+    onInitiateBypassInNewTab(selectedClient, accessReason);
   };
 
-  return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Feature Intro Banner */}
-      <div className="p-5 bg-gradient-to-r from-slate-900 via-amber-950/40 to-slate-900 border border-amber-500/30 rounded-2xl text-white shadow-lg relative overflow-hidden">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 relative z-10">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-amber-400 font-mono text-xs font-bold uppercase tracking-wider">
-              <ShieldAlert className="w-4 h-4 text-amber-400" />
-              Secure Super Admin Control Panel &amp; Account Bypass
-            </div>
-            <h3 className="text-xl font-black tracking-tight">
-              Passwordless Client Admin Account Access
-            </h3>
-            <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Select any client organization from the fleet below to review associated Admin account parameters and launch a secure troubleshooting session in a <strong className="text-white underline font-bold">new browser tab</strong> without requiring or exposing passwords.
-            </p>
-          </div>
+  if (!selectedClient) {
+    return (
+      <div className="p-8 text-center text-xs text-txt-secondary">
+        No clients registered on platform yet.
+      </div>
+    );
+  }
 
-          <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl text-amber-300 text-xs font-semibold">
-            <Lock className="w-4 h-4 text-amber-400 flex-shrink-0" />
-            <span>Zero Password Exposure &bull; Multi-Tab Session</span>
-          </div>
+  const clientDisplayName = selectedClient.companyName || selectedClient.name || 'Client Organization';
+  const clientDisplayCode = selectedClient.clientCode || selectedClient.code || 'CODE';
+
+  return (
+    <div className="space-y-6">
+      {/* Top Banner Warning */}
+      <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 shadow-sm space-y-2">
+        <div className="flex items-center gap-2 text-amber-700 font-extrabold text-sm">
+          <ShieldAlert className="w-5 h-5 text-amber-600" />
+          <span>SUPER ADMIN ADVANCED CONTROL PANEL — PASSWORDLESS CLIENT IMPERSONATION</span>
         </div>
+        <p className="text-xs text-txt-secondary leading-relaxed">
+          Super Admin can log into any Client Admin account without requiring the client&apos;s password.
+          When clicking <strong className="text-txt-primary">&quot;Login to Client Account&quot;</strong>, the selected client&apos;s Admin portal will open securely in a <span className="underline font-bold text-txt-primary">new browser tab</span>.
+          Your main Super Admin session will remain completely intact in this tab.
+        </p>
       </div>
 
-      {/* Main Control Panel Grid */}
+      {/* Control Workspace: 2-Column Split */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Search & Client Selector Dropdown (4 cols) */}
-        <div className="lg:col-span-5 bg-bg-surface border border-border rounded-2xl p-5 space-y-4 shadow-sm">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <h4 className="text-sm font-bold text-txt-primary flex items-center gap-2">
-              <Building2 className="w-4 h-4 text-brand-primary" />
-              1. Select Client Organization
-            </h4>
-            <span className="text-xs font-mono font-bold text-txt-secondary">
-              {clients.length} Total Fleet
-            </span>
-          </div>
+        {/* Left Column: Select Target Client (5 cols) */}
+        <div className="lg:col-span-5 bg-bg-surface border border-border rounded-2xl p-5 space-y-4 shadow-sm flex flex-col justify-between">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h4 className="text-sm font-bold text-txt-primary flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-500" />
+                1. Select Target Client Organization
+              </h4>
+            </div>
 
-          {/* Search Box */}
-          <div className="relative">
-            <Search className="w-4 h-4 text-txt-secondary absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by client name, code, or admin email..."
-              className="w-full pl-9 pr-3 py-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary placeholder-txt-secondary/60 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-            />
-          </div>
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-secondary" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Filter by company name or code..."
+                className="w-full pl-9 pr-3 py-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              />
+            </div>
 
-          {/* Client Selection Dropdown & Cards List */}
-          <div>
-            <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">
-              Client Selector Dropdown
-            </label>
+            {/* Select Dropdown */}
             <select
               value={selectedClientId}
               onChange={(e) => {
@@ -122,7 +112,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
             >
               {filteredClients.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.code}) — Admin: {c.adminAccount.name}
+                  {c.companyName || c.name} ({c.clientCode || c.code}) &mdash; Admin: {c.adminAccount?.name}
                 </option>
               ))}
             </select>
@@ -132,6 +122,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
           <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1 scrollbar-none">
             {filteredClients.map((c) => {
               const isSelected = c.id === selectedClientId;
+              const name = c.companyName || c.name;
               return (
                 <div
                   key={c.id}
@@ -148,13 +139,13 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                   <div className="flex items-center gap-3">
                     <img
                       src={c.logoUrl}
-                      alt={c.name}
+                      alt={name}
                       className="w-8 h-8 rounded-lg object-cover border border-border flex-shrink-0"
                     />
                     <div>
-                      <div className="text-xs font-bold text-txt-primary leading-tight">{c.name}</div>
+                      <div className="text-xs font-bold text-txt-primary leading-tight">{name}</div>
                       <div className="text-[10px] text-txt-secondary font-mono mt-0.5">
-                        Admin: {c.adminAccount.name} ({c.adminAccount.email})
+                        Admin: {c.adminAccount?.name} ({c.adminAccount?.email})
                       </div>
                     </div>
                   </div>
@@ -195,17 +186,17 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                 <div className="flex items-center gap-3">
                   <img
                     src={selectedClient.logoUrl}
-                    alt={selectedClient.name}
+                    alt={clientDisplayName}
                     className="w-12 h-12 rounded-xl object-cover border border-border"
                   />
                   <div>
                     <h3 className="text-base font-extrabold text-txt-primary">
-                      {selectedClient.name}
+                      {clientDisplayName}
                     </h3>
                     <div className="flex items-center gap-2 text-xs font-mono text-txt-secondary mt-0.5">
-                      <span>Code: {selectedClient.code}</span>
+                      <span>Code: {clientDisplayCode}</span>
                       <span>&bull;</span>
-                      <span>Tax ID: {selectedClient.taxId}</span>
+                      <span>Tax ID: {selectedClient.taxId || 'GSTIN-DEFAULT'}</span>
                     </div>
                   </div>
                 </div>
@@ -213,7 +204,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                 <div className="text-right font-mono text-xs">
                   <div className="text-txt-secondary text-[10px]">Pricing Model</div>
                   <div className="font-bold text-amber-600 uppercase">
-                    {selectedClient.subscription.pricingModel}
+                    {selectedClient.subscription?.pricingModel || 'PER_USER'}
                   </div>
                 </div>
               </div>
@@ -226,7 +217,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                   </span>
                   <span className="font-bold text-txt-primary flex items-center gap-1.5 mt-0.5">
                     <UserCheck className="w-3.5 h-3.5 text-brand-primary" />
-                    {selectedClient.adminAccount.name}
+                    {selectedClient.adminAccount?.name}
                   </span>
                 </div>
 
@@ -235,7 +226,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                     Admin Email Address
                   </span>
                   <span className="font-mono text-txt-primary mt-0.5 block">
-                    {selectedClient.adminAccount.email}
+                    {selectedClient.adminAccount?.email}
                   </span>
                 </div>
 
@@ -244,7 +235,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                     Admin Contact Phone
                   </span>
                   <span className="font-semibold text-txt-primary mt-0.5 block">
-                    {selectedClient.adminAccount.phone}
+                    {selectedClient.adminAccount?.phone}
                   </span>
                 </div>
 
@@ -253,7 +244,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                     Last Known Login
                   </span>
                   <span className="font-mono text-txt-secondary mt-0.5 block">
-                    {selectedClient.adminAccount.lastLoginAt}
+                    {selectedClient.adminAccount?.lastLoginAt || 'Recent'}
                   </span>
                 </div>
               </div>
@@ -294,7 +285,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                   <ExternalLink className="w-4 h-4 text-slate-950 ml-1" />
                 </button>
                 <p className="text-[11px] text-center text-txt-secondary mt-2">
-                  ⚡ Opens <strong className="text-txt-primary">{selectedClient.adminAccount.name}</strong> ({selectedClient.name}) in a <span className="underline font-bold text-txt-primary">new browser tab</span>. The original Super Admin tab will remain open.
+                  ⚡ Opens <strong className="text-txt-primary">{selectedClient.adminAccount?.name}</strong> ({clientDisplayName}) in a <span className="underline font-bold text-txt-primary">new browser tab</span>. The original Super Admin tab will remain open.
                 </p>
               </div>
             </form>
@@ -329,10 +320,10 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                   <td className="px-4 py-3 font-bold text-txt-primary">{log.superAdminName}</td>
                   <td className="px-4 py-3">
                     <div className="font-bold text-txt-primary">{log.clientName}</div>
-                    <div className="text-[11px] text-txt-secondary">{log.targetAdminName}</div>
+                    <div className="text-[11px] text-txt-secondary">{log.targetAdminName || log.adminEmail}</div>
                   </td>
                   <td className="px-4 py-3 text-txt-primary font-medium">{log.reason}</td>
-                  <td className="px-4 py-3 font-mono text-txt-secondary">{log.startTime}</td>
+                  <td className="px-4 py-3 font-mono text-txt-secondary">{log.startTime || log.timestamp}</td>
                   <td className="px-4 py-3 text-right">
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -341,7 +332,7 @@ export const SuperAdminControlTab: React.FC<SuperAdminControlTabProps> = ({
                           : 'bg-emerald-500/10 text-emerald-600'
                       }`}
                     >
-                      {log.sessionStatus}
+                      {log.sessionStatus || 'COMPLETED'}
                     </span>
                   </td>
                 </tr>

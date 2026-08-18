@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -6,19 +6,17 @@ import {
   ShieldAlert,
   Plus,
   DollarSign,
-  Crown
+  Crown,
+  Loader2
 } from 'lucide-react';
 import { useAuth } from '../../../core/auth';
-import {
-  INITIAL_SUPERADMIN_CLIENTS,
-  INITIAL_PAYMENT_TRANSACTIONS,
-  INITIAL_BYPASS_AUDIT_LOGS,
-  INITIAL_SUPERADMIN_ACTIVITY_LOGS,
+import type {
   SuperAdminClient,
   PaymentTransaction,
   BypassAuditLog,
   SuperAdminActivityLog
-} from '../../../mockData/superAdmin';
+} from '../types';
+import { superAdminApi } from '../services/superAdminApi';
 
 import { SuperAdminDashboardTab } from '../components/SuperAdminDashboardTab';
 import { ClientManagementTab } from '../components/ClientManagementTab';
@@ -46,145 +44,174 @@ export const SuperAdminPage: React.FC = () => {
   };
 
   // State
-  const [clients, setClients] = useState<SuperAdminClient[]>(INITIAL_SUPERADMIN_CLIENTS);
-  const [transactions, setTransactions] = useState<PaymentTransaction[]>(INITIAL_PAYMENT_TRANSACTIONS);
-  const [bypassLogs, setBypassLogs] = useState<BypassAuditLog[]>(INITIAL_BYPASS_AUDIT_LOGS);
-  const [activityLogs, setActivityLogs] = useState<SuperAdminActivityLog[]>(INITIAL_SUPERADMIN_ACTIVITY_LOGS);
+  const [clients, setClients] = useState<SuperAdminClient[]>([]);
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [bypassLogs, setBypassLogs] = useState<BypassAuditLog[]>([]);
+  const [activityLogs, setActivityLogs] = useState<SuperAdminActivityLog[]>([]);
+  const [loading, setLoading] = useState(true);
 
   // Modals state
   const [isCreateClientOpen, setIsCreateClientOpen] = useState(false);
   const [isRecordPaymentOpen, setIsRecordPaymentOpen] = useState(false);
 
-  // Handlers
-  const handleCreateClient = (newClient: SuperAdminClient) => {
-    setClients((prev) => [newClient, ...prev]);
+  // Load Data from Backend API
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [clientsData, bypassLogsData, auditLogsData] = await Promise.all([
+          superAdminApi.getClients(),
+          superAdminApi.getImpersonationAuditLogs(),
+          superAdminApi.getAuditLogs()
+        ]);
 
-    const newActivity: SuperAdminActivityLog = {
-      id: 'sal-' + Date.now(),
-      timestamp: new Date().toLocaleString(),
-      actorName: user?.name || 'Super Admin',
-      actorEmail: user?.email || 'superadmin@watchtower.dev',
-      action: 'CLIENT_CREATED',
-      category: 'CLIENT',
-      details: `Created new client ${newClient.name} (${newClient.code}) with plan ${newClient.subscription.planName}`,
-      targetClient: newClient.name
-    };
-    setActivityLogs((prev) => [newActivity, ...prev]);
-  };
-
-  const handleRecordPayment = (tx: PaymentTransaction) => {
-    setTransactions((prev) => [tx, ...prev]);
-
-    if (tx.status === 'PAID') {
-      setClients((prev) =>
-        prev.map((c) =>
-          c.id === tx.clientId
-            ? { ...c, totalPaidToDate: c.totalPaidToDate + tx.amount }
-            : c
-        )
-      );
+        if (isMounted) {
+          setClients(clientsData);
+          setBypassLogs(bypassLogsData);
+          setActivityLogs(auditLogsData);
+        }
+      } catch (err) {
+        console.error('Failed to fetch Super Admin data from server:', err);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
     }
 
-    const newActivity: SuperAdminActivityLog = {
-      id: 'sal-' + Date.now(),
-      timestamp: new Date().toLocaleString(),
-      actorName: user?.name || 'Super Admin',
-      actorEmail: user?.email || 'superadmin@watchtower.dev',
-      action: 'PAYMENT_RECORDED',
-      category: 'PAYMENT',
-      details: `Recorded payment of ₹${tx.amount.toLocaleString('en-IN')} for ${tx.clientName} (${tx.invoiceNumber})`,
-      targetClient: tx.clientName
+    loadData();
+    return () => {
+      isMounted = false;
     };
-    setActivityLogs((prev) => [newActivity, ...prev]);
+  }, []);
+
+  // Handlers connected to backend API
+  const handleCreateClient = async (clientData: any) => {
+    try {
+      const newClient = await superAdminApi.createClient(clientData);
+      setClients((prev) => [newClient, ...prev]);
+
+      const newActivity: SuperAdminActivityLog = {
+        id: 'sal-' + Date.now(),
+        timestamp: new Date().toLocaleString(),
+        actor: user?.name || 'Super Admin',
+        actorName: user?.name || 'Super Admin',
+        action: 'CLIENT_CREATED',
+        category: 'CLIENT',
+        details: `Created new client ${newClient.companyName || newClient.name} (${newClient.clientCode || newClient.code}) with plan ${newClient.subscription?.planName || 'Standard Suite'}`,
+        targetClient: newClient.companyName || newClient.name
+      };
+      setActivityLogs((prev) => [newActivity, ...prev]);
+    } catch (err) {
+      console.error('Error creating client:', err);
+    }
   };
 
-  const handleToggleStatus = (clientId: string) => {
-    setClients((prev) =>
-      prev.map((c) => {
-        if (c.id === clientId) {
-          const nextStatus = c.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+  const handleRecordPayment = async (txData: any) => {
+    try {
+      const tx = await superAdminApi.recordPayment(txData);
+      setTransactions((prev) => [tx, ...prev]);
 
-          const newActivity: SuperAdminActivityLog = {
-            id: 'sal-' + Date.now(),
-            timestamp: new Date().toLocaleString(),
-            actorName: user?.name || 'Super Admin',
-            actorEmail: user?.email || 'superadmin@watchtower.dev',
-            action: 'STATUS_CHANGED',
-            category: 'CLIENT',
-            details: `Changed account status of ${c.name} to ${nextStatus}`,
-            targetClient: c.name
-          };
-          setActivityLogs((a) => [newActivity, ...a]);
+      if (tx.status === 'PAID') {
+        setClients((prev) =>
+          prev.map((c) =>
+            c.id === tx.clientId
+              ? { ...c, totalPaidToDate: (c.totalPaidToDate || 0) + tx.amount }
+              : c
+          )
+        );
+      }
 
-          return {
-            ...c,
-            status: nextStatus,
-            adminAccount: { ...c.adminAccount, status: nextStatus }
-          };
-        }
-        return c;
-      })
-    );
+      const newActivity: SuperAdminActivityLog = {
+        id: 'sal-' + Date.now(),
+        timestamp: new Date().toLocaleString(),
+        actor: user?.name || 'Super Admin',
+        actorName: user?.name || 'Super Admin',
+        action: 'PAYMENT_RECORDED',
+        category: 'BILLING',
+        details: `Recorded payment of ₹${tx.amount.toLocaleString('en-IN')} for ${tx.clientName || 'Client'} (${tx.invoiceNumber})`,
+        targetClient: tx.clientName
+      };
+      setActivityLogs((prev) => [newActivity, ...prev]);
+    } catch (err) {
+      console.error('Error recording payment:', err);
+    }
   };
 
-  const handleUpdateClient = (updated: SuperAdminClient) => {
-    setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  const handleToggleStatus = async (clientId: string) => {
+    const target = clients.find((c) => c.id === clientId);
+    if (!target) return;
 
-    const newActivity: SuperAdminActivityLog = {
-      id: 'sal-' + Date.now(),
-      timestamp: new Date().toLocaleString(),
-      actorName: user?.name || 'Super Admin',
-      actorEmail: user?.email || 'superadmin@watchtower.dev',
-      action: 'CLIENT_UPDATED',
-      category: 'CLIENT',
-      details: `Updated company information for ${updated.name}`,
-      targetClient: updated.name
-    };
-    setActivityLogs((a) => [newActivity, ...a]);
+    const nextStatus = target.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try {
+      await superAdminApi.toggleClientStatus(clientId, nextStatus);
+
+      setClients((prev) =>
+        prev.map((c) => {
+          if (c.id === clientId) {
+            return {
+              ...c,
+              status: nextStatus,
+              adminAccount: { ...c.adminAccount, status: nextStatus }
+            };
+          }
+          return c;
+        })
+      );
+    } catch (err) {
+      console.error('Error toggling client status:', err);
+    }
   };
 
-  const handleInitiateBypassInNewTab = (client: SuperAdminClient, reason: string) => {
-    const bypassLog: BypassAuditLog = {
-      id: 'bpl-' + Date.now(),
-      superAdminName: user?.name || 'Alex Morgan',
-      superAdminEmail: user?.email || 'superadmin@watchtower.dev',
-      targetAdminId: client.adminAccount.adminId,
-      targetAdminName: client.adminAccount.name,
-      targetAdminEmail: client.adminAccount.email,
-      clientId: client.id,
-      clientName: client.name,
-      reason,
-      startTime: new Date().toLocaleString(),
-      sessionStatus: 'ACTIVE',
-      ipAddress: '103.21.124.89 (Current Session)',
-      userAgent: navigator.userAgent || 'Chrome/MacOS'
-    };
+  const handleUpdateClient = async (updated: SuperAdminClient) => {
+    try {
+      await superAdminApi.updateClient(updated.id, updated);
+      setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    } catch (err) {
+      console.error('Error updating client:', err);
+    }
+  };
 
-    setBypassLogs((prev) => [bypassLog, ...prev]);
+  const handleInitiateBypassInNewTab = async (client: SuperAdminClient, reason: string) => {
+    try {
+      const res = await superAdminApi.initiateImpersonation(client.id, reason);
 
-    const newActivity: SuperAdminActivityLog = {
-      id: 'sal-' + Date.now(),
-      timestamp: new Date().toLocaleString(),
-      actorName: user?.name || 'Super Admin',
-      actorEmail: user?.email || 'superadmin@watchtower.dev',
-      action: 'BYPASS_LOGIN_STARTED',
-      category: 'SECURITY',
-      details: `Initiated Login to Client Account in NEW TAB for ${client.adminAccount.name} (${client.name}). Reason: "${reason}"`,
-      targetClient: client.name
-    };
-    setActivityLogs((prev) => [newActivity, ...prev]);
+      const clientNameStr = client.companyName || client.name || 'Client Org';
 
-    startBypassSession(
-      {
-        name: client.adminAccount.name,
-        email: client.adminAccount.email,
-        clientName: client.name,
+      const bypassLog: BypassAuditLog = {
+        id: res.session?.id || 'bpl-' + Date.now(),
+        superAdminId: user?.id || 'sa-1',
+        superAdminName: user?.name || 'Alex Morgan',
+        superAdminEmail: user?.email || 'superadmin@watchtower.dev',
+        adminId: client.adminAccount.adminId || client.adminAccount.id,
+        targetAdminName: client.adminAccount.name,
+        adminEmail: client.adminAccount.email,
         clientId: client.id,
-        adminId: client.adminAccount.adminId
-      },
-      reason,
-      true
-    );
+        clientName: clientNameStr,
+        reason,
+        startTime: new Date().toLocaleString(),
+        sessionStatus: 'ACTIVE',
+        timestamp: new Date().toISOString(),
+        ipAddress: '103.21.124.89 (Current Session)',
+        durationMinutes: 60,
+        actionsTaken: ['INITIATE_SESSION']
+      };
+
+      setBypassLogs((prev) => [bypassLog, ...prev]);
+
+      startBypassSession(
+        {
+          name: client.adminAccount.name,
+          email: client.adminAccount.email,
+          clientName: clientNameStr,
+          clientId: client.id,
+          adminId: client.adminAccount.adminId || client.adminAccount.id
+        },
+        reason,
+        true
+      );
+    } catch (err) {
+      console.error('Error initiating bypass session:', err);
+    }
   };
 
   return (
@@ -263,8 +290,15 @@ export const SuperAdminPage: React.FC = () => {
         </button>
       </div>
 
+      {loading && (
+        <div className="flex items-center justify-center p-8 gap-2 text-txt-secondary text-xs font-medium">
+          <Loader2 className="w-5 h-5 animate-spin text-brand-primary" />
+          Syncing Super Admin data from WatchTower API...
+        </div>
+      )}
+
       {/* Screen Views */}
-      {activeTab === 'dashboard' && (
+      {!loading && activeTab === 'dashboard' && (
         <SuperAdminDashboardTab
           clients={clients}
           transactions={transactions}
@@ -274,7 +308,7 @@ export const SuperAdminPage: React.FC = () => {
         />
       )}
 
-      {activeTab === 'clients' && (
+      {!loading && activeTab === 'clients' && (
         <ClientManagementTab
           clients={clients}
           transactions={transactions}
@@ -285,7 +319,7 @@ export const SuperAdminPage: React.FC = () => {
         />
       )}
 
-      {activeTab === 'control' && (
+      {!loading && activeTab === 'control' && (
         <SuperAdminControlTab
           clients={clients}
           bypassLogs={bypassLogs}

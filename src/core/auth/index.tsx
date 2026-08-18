@@ -1,11 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { authApi } from '../../services/authApi';
 
 export interface User {
+  id?: string;
   name: string;
   email: string;
   role: string;
   avatarUrl: string;
   roleCode?: string;
+  tenantId?: string;
+  tenantName?: string;
 }
 
 export interface ImpersonatedSession {
@@ -23,43 +27,11 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isImpersonating: boolean;
   impersonatedSession: ImpersonatedSession | null;
-  login: (email: string, pass: string) => boolean;
-  quickLogin: (userType: 'superadmin' | 'admin' | 'manager' | 'supervisor') => void;
+  login: (email: string, pass: string) => Promise<boolean>;
   logout: () => void;
   startBypassSession: (targetAdmin: { name: string; email: string; clientName: string; clientId: string; adminId: string }, reason: string, openNewTab?: boolean) => void;
   exitBypassSession: () => void;
 }
-
-export const DEMO_USERS: Record<string, User> = {
-  superadmin: {
-    name: 'Alex Morgan',
-    email: 'superadmin@watchtower.dev',
-    role: 'Super Administrator',
-    roleCode: 'SUPER_ADMIN',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-  },
-  admin: {
-    name: 'Olivia Chen',
-    email: 'admin@watchtower.dev',
-    role: 'Organization Admin',
-    roleCode: 'ORG_ADMIN',
-    avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'
-  },
-  manager: {
-    name: 'Vikramaditya Rao',
-    email: 'manager@watchtower.dev',
-    role: 'Regional Operations Manager',
-    roleCode: 'REGIONAL_MGR',
-    avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150'
-  },
-  supervisor: {
-    name: 'Priya Sharma',
-    email: 'supervisor@watchtower.dev',
-    role: 'Field Attendance Supervisor',
-    roleCode: 'SITE_SUPERVISOR',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-  }
-};
 
 const STORAGE_KEY = 'wt_session_v2';
 const IMPERSONATE_KEY = 'wt_impersonate_v1';
@@ -103,60 +75,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [user, setUser] = useState<User | null>(() => {
     if (initialImpersonation) {
-      const impersonatedUser: User = {
+      return {
         name: initialImpersonation.adminName,
         email: initialImpersonation.adminEmail,
         role: `Client Admin (${initialImpersonation.clientName})`,
-        roleCode: 'CLIENT_ADMIN',
-        avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(initialImpersonation.adminName)}&background=0D8ABC&color=fff`
+        roleCode: 'ORG_ADMIN',
+        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'
       };
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(impersonatedUser));
-      return impersonatedUser;
     }
     try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY);
       return saved ? JSON.parse(saved) : null;
     } catch {
       return null;
     }
   });
 
-  const setAndStoreUser = (u: User | null) => {
+  const saveUser = (u: User | null) => {
     setUser(u);
     if (u) {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
     } else {
-      sessionStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY);
     }
   };
 
-  const setAndStoreImpersonation = (session: ImpersonatedSession | null) => {
-    setImpersonatedSession(session);
-    if (session) {
-      sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(session));
-    } else {
-      sessionStorage.removeItem(IMPERSONATE_KEY);
+  const login = async (email: string, pass: string): Promise<boolean> => {
+    const res = await authApi.login(email, pass);
+    if (res.token) {
+      localStorage.setItem('token', res.token);
     }
-  };
-
-  const login = (email: string, _pass: string): boolean => {
-    if (!email) return false;
-    let loggedUser = DEMO_USERS.admin;
-    if (email.includes('superadmin')) loggedUser = DEMO_USERS.superadmin;
-    else if (email.includes('manager')) loggedUser = DEMO_USERS.manager;
-    else if (email.includes('supervisor')) loggedUser = DEMO_USERS.supervisor;
-    setAndStoreUser(loggedUser);
-    return true;
-  };
-
-  const quickLogin = (userType: 'superadmin' | 'admin' | 'manager' | 'supervisor') => {
-    const loggedUser = DEMO_USERS[userType] || DEMO_USERS.admin;
-    setAndStoreUser(loggedUser);
+    if (res.user) {
+      saveUser(res.user);
+      return true;
+    }
+    throw new Error('Invalid login response from server');
   };
 
   const logout = () => {
-    setAndStoreUser(null);
-    setAndStoreImpersonation(null);
+    saveUser(null);
+    setImpersonatedSession(null);
+    sessionStorage.removeItem(IMPERSONATE_KEY);
+    localStorage.removeItem('token');
   };
 
   const startBypassSession = (
@@ -165,7 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     openNewTab: boolean = true
   ) => {
     const sessionId = 'bpl-' + Date.now();
-    const session: ImpersonatedSession = {
+    const sessionObj: ImpersonatedSession = {
       adminName: targetAdmin.name,
       adminEmail: targetAdmin.email,
       clientName: targetAdmin.clientName,
@@ -176,33 +136,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     if (openNewTab) {
-      // Build parameters URL for new tab
-      const searchParams = new URLSearchParams({
+      const params = new URLSearchParams({
         bypassSessionId: sessionId,
         adminName: targetAdmin.name,
         adminEmail: targetAdmin.email,
         clientName: targetAdmin.clientName,
         clientId: targetAdmin.clientId,
-        reason: reason
+        reason
       });
-      const newTabUrl = `${window.location.origin}/?${searchParams.toString()}`;
+      const newTabUrl = `${window.location.origin}/?${params.toString()}`;
       window.open(newTabUrl, '_blank');
-    } else {
-      setAndStoreImpersonation(session);
-      setAndStoreUser({
-        name: targetAdmin.name,
-        email: targetAdmin.email,
-        role: `Client Admin (${targetAdmin.clientName})`,
-        roleCode: 'CLIENT_ADMIN',
-        avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(targetAdmin.name)}&background=0D8ABC&color=fff`
-      });
+      return;
     }
+
+    sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(sessionObj));
+    setImpersonatedSession(sessionObj);
+    saveUser({
+      name: targetAdmin.name,
+      email: targetAdmin.email,
+      role: `Client Admin (${targetAdmin.clientName})`,
+      roleCode: 'ORG_ADMIN',
+      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'
+    });
   };
 
   const exitBypassSession = () => {
-    setAndStoreImpersonation(null);
-    // Restore Super Admin user account
-    setAndStoreUser(DEMO_USERS.superadmin);
+    setImpersonatedSession(null);
+    sessionStorage.removeItem(IMPERSONATE_KEY);
+    saveUser({
+      name: 'Alex Morgan',
+      email: 'superadmin@watchtower.dev',
+      role: 'Super Administrator',
+      roleCode: 'SUPER_ADMIN',
+      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
+    });
   };
 
   return (
@@ -213,7 +180,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isImpersonating: !!impersonatedSession,
         impersonatedSession,
         login,
-        quickLogin,
         logout,
         startBypassSession,
         exitBypassSession
@@ -225,7 +191,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };

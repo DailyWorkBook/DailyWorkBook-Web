@@ -43,7 +43,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
     const newTx: PaymentTransaction = {
       id: 'tx-' + Date.now(),
       clientId: targetClient.id,
-      clientName: targetClient.name,
+      clientName: targetClient.companyName || targetClient.name || '',
       invoiceNumber,
       billingPeriod,
       amount,
@@ -94,7 +94,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
             >
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} ({c.code}) — Plan: {c.subscription.pricingModel}
+                  {c.companyName || c.name} ({c.clientCode || c.code}) — Plan: {c.subscription.pricingModel}
                 </option>
               ))}
             </select>

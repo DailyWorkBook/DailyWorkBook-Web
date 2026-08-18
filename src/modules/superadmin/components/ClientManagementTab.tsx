@@ -371,7 +371,7 @@ export const ClientManagementTab: React.FC<ClientManagementTabProps> = ({
                   <div>Billing Cycle: <span className="font-semibold text-txt-primary">{selectedClientForModal.subscription.billingCycle}</span></div>
                   <div>Estimated MRR: <span className="font-bold text-txt-primary">₹{selectedClientForModal.subscription.monthlyEstimatedAmount.toLocaleString('en-IN')}</span></div>
                   <div>Expiry Date: <span className="font-mono text-txt-primary">{selectedClientForModal.subscription.expiryDate}</span></div>
-                  <div>Total Paid to Date: <span className="font-bold text-emerald-600">₹{selectedClientForModal.totalPaidToDate.toLocaleString('en-IN')}</span></div>
+                  <div>Total Paid to Date: <span className="font-bold text-emerald-600">₹{(selectedClientForModal.totalPaidToDate || 0).toLocaleString('en-IN')}</span></div>
                 </div>
               </div>
             </div>
@@ -393,7 +393,7 @@ export const ClientManagementTab: React.FC<ClientManagementTabProps> = ({
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-txt-primary border-b border-border pb-3">
-              Edit Client Info: {editingClient.name}
+              Edit Client Info: {editingClient.companyName || editingClient.name}
             </h3>
 
             <form onSubmit={handleSaveEdit} className="space-y-3 text-xs">

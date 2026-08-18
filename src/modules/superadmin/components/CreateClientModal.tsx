@@ -61,27 +61,32 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
 
     const newClient: SuperAdminClient = {
       id: generatedId,
+      companyName,
       name: companyName,
+      clientCode: generatedCode,
       code: generatedCode,
       taxId: taxId || '27AAACX1234F1Z0',
       industry,
+      address: billingAddress || 'Corporate Office Address',
       billingAddress: billingAddress || 'Corporate Office Address',
       city,
+      country: 'India',
       contactPerson: contactPerson || adminName || 'Chief Security Officer',
       contactPhone: contactPhone || adminPhone || '+91 98000 00000',
       contactEmail: contactEmail || adminEmail,
       logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=150',
       status: 'ACTIVE',
       createdAt: new Date().toISOString().split('T')[0],
+      payments: [],
       adminAccount: {
+        id: 'adm-' + Date.now(),
         adminId: 'adm-' + Date.now(),
         name: adminName || contactPerson || 'Admin User',
         email: adminEmail,
         phone: adminPhone || contactPhone || '+91 98000 00000',
-        role: 'Client Security Admin',
+        designation: 'Client Security Admin',
         status: 'ACTIVE',
-        lastLoginAt: 'Never',
-        createdAt: new Date().toISOString().split('T')[0]
+        lastLoginAt: 'Never'
       },
       subscription: {
         planName,

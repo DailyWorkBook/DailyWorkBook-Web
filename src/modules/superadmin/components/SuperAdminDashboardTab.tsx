@@ -42,7 +42,7 @@ export const SuperAdminDashboardTab: React.FC<SuperAdminDashboardTabProps> = ({
   const activeSubscriptions = clients.filter((c) => c.subscription.status === 'ACTIVE').length;
   const expiringSubscriptions = clients.filter((c) => c.subscription.status === 'PENDING_RENEWAL' || c.subscription.status === 'EXPIRED').length;
 
-  const totalRevenue = clients.reduce((sum, c) => sum + c.totalPaidToDate, 0);
+  const totalRevenue = clients.reduce((sum, c) => sum + (c.totalPaidToDate || 0), 0);
   const pendingPaymentsAmount = transactions
     .filter((t) => t.status === 'PENDING' || t.status === 'OVERDUE')
     .reduce((sum, t) => sum + t.amount, 0);
@@ -287,10 +287,10 @@ export const SuperAdminDashboardTab: React.FC<SuperAdminDashboardTabProps> = ({
                     <td className="py-2.5 font-bold text-txt-primary flex items-center gap-2">
                       <img
                         src={c.logoUrl}
-                        alt={c.name}
+                        alt={c.companyName || c.name}
                         className="w-6 h-6 rounded-md object-cover border border-border"
                       />
-                      <span>{c.name}</span>
+                      <span>{c.companyName || c.name}</span>
                     </td>
                     <td className="py-2.5 text-txt-secondary font-mono">
                       {c.adminAccount.email}
