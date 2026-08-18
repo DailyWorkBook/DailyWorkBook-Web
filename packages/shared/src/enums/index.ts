@@ -1,0 +1,73 @@
+export enum EmployeeStatus {
+  ONBOARDING = 'ONBOARDING',
+  ACTIVE = 'ACTIVE',
+  ON_LEAVE = 'ON_LEAVE',
+  INACTIVE = 'INACTIVE',
+  TERMINATED = 'TERMINATED'
+}
+
+export enum EmployeeRole {
+  SECURITY_GUARD = 'SECURITY_GUARD',
+  SECURITY_OFFICER = 'SECURITY_OFFICER',
+  RELIEVER = 'RELIEVER',
+  TEMPORARY = 'TEMPORARY'
+}
+
+export enum AttendanceState {
+  PRESENT = 'PRESENT',
+  LATE_IN = 'LATE_IN',
+  LATE_IN_HALF_DAY = 'LATE_IN_HALF_DAY',
+  ABSENT = 'ABSENT',
+  HALF_DAY_LEAVE = 'HALF_DAY_LEAVE',
+  ON_LEAVE = 'ON_LEAVE',
+  HOLIDAY = 'HOLIDAY',
+  EARLY_EXIT = 'EARLY_EXIT',
+  EXCEPTION_PENDING = 'EXCEPTION_PENDING',
+  COMP_OFF = 'COMP_OFF'
+}
+
+export enum AttendanceMethod {
+  QR = 'QR',
+  GPS = 'GPS',
+  MANUAL = 'MANUAL'
+}
+
+export enum AttendanceEventType {
+  CHECK_IN = 'CHECK_IN',
+  CHECK_OUT = 'CHECK_OUT'
+}
+
+export enum ApprovalStatus {
+  AUTO_APPROVED = 'AUTO_APPROVED',
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED'
+}
+
+export enum ShiftType {
+  FIXED = 'FIXED',
+  ROTATIONAL = 'ROTATIONAL',
+  SPLIT = 'SPLIT',
+  NIGHT = 'NIGHT',
+  FLEXIBLE = 'FLEXIBLE'
+}
+
+export enum LeaveType {
+  CASUAL = 'CASUAL',
+  EARNED = 'EARNED',
+  MEDICAL = 'MEDICAL',
+  UNPAID = 'UNPAID',
+  COMP_OFF = 'COMP_OFF'
+}
+
+export enum LeaveStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  CANCELLED = 'CANCELLED'
+}
+
+export enum HolidayScope {
+  NATIONAL = 'NATIONAL',
+  SITE = 'SITE'
+}
