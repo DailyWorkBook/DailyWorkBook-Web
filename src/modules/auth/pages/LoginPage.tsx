@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck, Lock, Mail, ArrowRight, Eye, EyeOff,
-  CheckCircle2, UserCheck, Sparkles, Building2, Users, MapPin
+  CheckCircle2, UserCheck, Sparkles, Building2, Users, MapPin, Crown
 } from 'lucide-react';
 import { useAuth, DEMO_USERS } from '../../../core/auth';
 
@@ -19,8 +19,8 @@ export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
   const { login, quickLogin, isAuthenticated } = useAuth();
 
-  const [demoRole, setDemoRole] = useState<'admin' | 'manager' | 'supervisor'>('admin');
-  const [email, setEmail] = useState(DEMO_USERS.admin.email);
+  const [demoRole, setDemoRole] = useState<'superadmin' | 'admin' | 'manager' | 'supervisor'>('superadmin');
+  const [email, setEmail] = useState(DEMO_USERS.superadmin.email);
   const [password, setPassword] = useState('Admin@123');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -38,7 +38,7 @@ export const LoginPage: React.FC = () => {
     return () => clearInterval(t);
   }, []);
 
-  const handleRoleSelect = (role: 'admin' | 'manager' | 'supervisor') => {
+  const handleRoleSelect = (role: 'superadmin' | 'admin' | 'manager' | 'supervisor') => {
     setDemoRole(role);
     setEmail(DEMO_USERS[role].email);
     setPassword('Admin@123');
@@ -52,14 +52,17 @@ export const LoginPage: React.FC = () => {
     setTimeout(() => {
       const success = login(email, password);
       setIsLoading(false);
-      if (success) navigate('/');
-      else setError('Invalid credentials. Use one of the demo accounts below.');
+      if (success) {
+        if (email.includes('superadmin')) navigate('/superadmin');
+        else navigate('/');
+      } else setError('Invalid credentials. Use one of the demo accounts below.');
     }, 500);
   };
 
-  const handleQuickLogin = (role: 'admin' | 'manager' | 'supervisor') => {
+  const handleQuickLogin = (role: 'superadmin' | 'admin' | 'manager' | 'supervisor') => {
     quickLogin(role);
-    navigate('/');
+    if (role === 'superadmin') navigate('/superadmin');
+    else navigate('/');
   };
 
   return (
@@ -161,24 +164,26 @@ export const LoginPage: React.FC = () => {
           {/* Demo Role Tabs */}
           <div className="mb-6">
             <label className="block text-xs font-bold text-txt-secondary uppercase tracking-wider mb-2">Demo Account</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['admin', 'manager', 'supervisor'] as const).map(role => (
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['superadmin', 'admin', 'manager', 'supervisor'] as const).map(role => (
                 <button
                   key={role}
                   type="button"
                   onClick={() => handleRoleSelect(role)}
-                  className={`p-3 rounded-xl border text-xs font-semibold transition-all text-center capitalize ${
+                  className={`p-2.5 rounded-xl border text-[11px] font-bold transition-all text-center capitalize ${
                     demoRole === role
-                      ? 'border-brand-primary bg-brand-primary text-white shadow-md shadow-brand-primary/25'
+                      ? role === 'superadmin'
+                        ? 'border-amber-500 bg-amber-600 text-white shadow-md shadow-amber-600/25'
+                        : 'border-brand-primary bg-brand-primary text-white shadow-md shadow-brand-primary/25'
                       : 'border-border bg-bg-surface text-txt-secondary hover:text-txt-primary hover:bg-bg-surface-2'
                   }`}
                 >
-                  {role === 'admin' ? '🛡️ Admin' : role === 'manager' ? '📋 Manager' : '👤 Supervisor'}
+                  {role === 'superadmin' ? '👑 Super' : role === 'admin' ? '🛡️ Admin' : role === 'manager' ? '📋 Mgr' : '👤 Sup'}
                 </button>
               ))}
             </div>
             <p className="text-[11px] text-txt-tertiary mt-2">
-              {DEMO_USERS[demoRole].name} · {DEMO_USERS[demoRole].role}
+              {DEMO_USERS[demoRole].name} &middot; {DEMO_USERS[demoRole].role}
             </p>
           </div>
 
@@ -256,18 +261,18 @@ export const LoginPage: React.FC = () => {
           {/* One-click demo logins */}
           <div className="grid grid-cols-2 gap-3">
             <button
+              onClick={() => handleQuickLogin('superadmin')}
+              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 text-xs font-bold hover:bg-amber-500/20 transition-colors"
+            >
+              <Crown className="w-4 h-4 text-amber-600" />
+              Super Admin Login
+            </button>
+            <button
               onClick={() => handleQuickLogin('admin')}
               className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-brand-primary/30 bg-brand-primary/8 text-brand-primary text-xs font-bold hover:bg-brand-primary/15 transition-colors"
             >
               <UserCheck className="w-4 h-4" />
-              Admin Login
-            </button>
-            <button
-              onClick={() => handleQuickLogin('manager')}
-              className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-brand-teal/30 bg-brand-teal/8 text-brand-teal text-xs font-bold hover:bg-brand-teal/15 transition-colors"
-            >
-              <UserCheck className="w-4 h-4" />
-              Manager Login
+              Org Admin Login
             </button>
           </div>
 

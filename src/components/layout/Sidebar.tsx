@@ -19,7 +19,8 @@ import {
   ChevronRight,
   Briefcase,
   DollarSign,
-  Radio
+  Crown,
+  ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../core/auth';
 
@@ -32,7 +33,15 @@ export interface NavItem {
   section?: string;
 }
 
-export const navItems: NavItem[] = [
+// Super Admin Navigation (Exactly 3 Main Tabs)
+export const superAdminNavItems: NavItem[] = [
+  { label: 'Super Admin Dashboard', path: '/superadmin/dashboard', icon: LayoutDashboard, section: 'SUPER ADMIN' },
+  { label: 'Client Management', path: '/superadmin/clients', icon: Building2, section: 'SUPER ADMIN' },
+  { label: 'Super Admin Control', path: '/superadmin/control', icon: ShieldAlert, section: 'SUPER ADMIN' },
+];
+
+// Operational Client Admin / Manager / Supervisor Navigation
+export const operationalNavItems: NavItem[] = [
   { label: 'Dashboard', path: '/', icon: LayoutDashboard, section: 'OVERVIEW' },
   { label: 'Attendance Register', path: '/attendance', icon: CalendarCheck, section: 'OVERVIEW' },
   { label: 'Exceptions Queue', path: '/exceptions', icon: AlertTriangle, badge: 4, badgeColor: 'bg-amber-500 text-white shadow-sm shadow-amber-500/30', section: 'OVERVIEW' },
@@ -47,12 +56,19 @@ export const navItems: NavItem[] = [
   { label: 'System Audit Log', path: '/audit', icon: ClipboardList, section: 'SYSTEM' },
 ];
 
-const SECTIONS = ['OVERVIEW', 'WORKFORCE', 'FINANCIALS', 'SYSTEM'];
+export const navItems = operationalNavItems;
 
 export const Sidebar: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
+
+  const isSuperAdmin = user?.roleCode === 'SUPER_ADMIN';
+
+  const itemsToRender = isSuperAdmin ? superAdminNavItems : operationalNavItems;
+  const sectionsToRender = isSuperAdmin
+    ? ['SUPER ADMIN']
+    : ['OVERVIEW', 'WORKFORCE', 'FINANCIALS', 'SYSTEM'];
 
   const isActive = (item: NavItem) =>
     item.path === '/'
@@ -70,8 +86,16 @@ export const Sidebar: React.FC = () => {
     >
       {/* Brand Header */}
       <div className={`flex items-center gap-3 px-4 py-4 border-b border-sidebar-border/80 bg-gradient-to-r from-sidebar-bg via-sidebar-bg to-brand-primary/10 ${collapsed ? 'justify-center' : ''}`}>
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-primary to-brand-teal flex items-center justify-center flex-shrink-0 shadow-lg shadow-brand-primary/40 ring-2 ring-white/10">
-          <ShieldCheck className="w-5 h-5 text-white stroke-[2]" />
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg ring-2 ring-white/10 ${
+          isSuperAdmin
+            ? 'bg-gradient-to-br from-amber-500 to-amber-700 shadow-amber-600/40'
+            : 'bg-gradient-to-br from-brand-primary to-brand-teal shadow-brand-primary/40'
+        }`}>
+          {isSuperAdmin ? (
+            <Crown className="w-5 h-5 text-white stroke-[2]" />
+          ) : (
+            <ShieldCheck className="w-5 h-5 text-white stroke-[2]" />
+          )}
         </div>
 
         <AnimatePresence>
@@ -84,10 +108,14 @@ export const Sidebar: React.FC = () => {
               className="min-w-0 flex-1"
             >
               <div className="flex items-center gap-1.5">
-                <span className="text-sm font-extrabold text-white tracking-tight leading-none">WatchTower</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-sm font-extrabold text-white tracking-tight leading-none">
+                  {isSuperAdmin ? 'WatchTower HQ' : 'WatchTower'}
+                </span>
+                <span className={`w-2 h-2 rounded-full animate-pulse ${isSuperAdmin ? 'bg-amber-400' : 'bg-emerald-400'}`} />
               </div>
-              <div className="text-[11px] text-white/50 font-medium leading-tight mt-0.5">Security Command</div>
+              <div className="text-[11px] text-white/50 font-medium leading-tight mt-0.5">
+                {isSuperAdmin ? 'Super Admin Portal' : 'Security Command'}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -95,8 +123,8 @@ export const Sidebar: React.FC = () => {
 
       {/* Navigation Links */}
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-3 scrollbar-none">
-        {SECTIONS.map(section => {
-          const sectionItems = navItems.filter(n => n.section === section);
+        {sectionsToRender.map(section => {
+          const sectionItems = itemsToRender.filter(n => n.section === section);
           return (
             <div key={section} className="space-y-1">
               <AnimatePresence>
@@ -123,9 +151,11 @@ export const Sidebar: React.FC = () => {
                   <div key={item.path} className="relative group">
                     <NavLink
                       to={item.path}
-                      className={`relative flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-150 cursor-pointer ${
+                      className={`relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 cursor-pointer ${
                         active
-                          ? 'bg-gradient-to-r from-brand-primary to-brand-primary-600 text-white font-bold shadow-md shadow-brand-primary/30 ring-1 ring-white/20'
+                          ? isSuperAdmin
+                            ? 'bg-gradient-to-r from-amber-600 to-amber-700 text-white font-bold shadow-md shadow-amber-600/30 ring-1 ring-white/20'
+                            : 'bg-gradient-to-r from-brand-primary to-brand-primary-600 text-white font-bold shadow-md shadow-brand-primary/30 ring-1 ring-white/20'
                           : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
                       } ${collapsed ? 'justify-center' : ''}`}
                     >
@@ -175,23 +205,25 @@ export const Sidebar: React.FC = () => {
 
       {/* Settings & Logout Footer */}
       <div className="border-t border-sidebar-border/80 px-3 py-2.5 space-y-1 bg-sidebar-bg/80 backdrop-blur-md">
-        <NavLink
-          to="/settings"
-          className={({ isActive: a }) =>
-            `flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-150 ${
-              a ? 'bg-white/10 text-white font-bold ring-1 ring-white/10' : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
-            } ${collapsed ? 'justify-center' : ''}`
-          }
-        >
-          <Settings className="w-4 h-4 stroke-[1.8] flex-shrink-0" />
-          <AnimatePresence>
-            {!collapsed && (
-              <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[12.5px]">
-                System Settings
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </NavLink>
+        {!isSuperAdmin && (
+          <NavLink
+            to="/settings"
+            className={({ isActive: a }) =>
+              `flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-150 ${
+                a ? 'bg-white/10 text-white font-bold ring-1 ring-white/10' : 'text-white/60 hover:text-white hover:bg-white/5 font-medium'
+              } ${collapsed ? 'justify-center' : ''}`
+            }
+          >
+            <Settings className="w-4 h-4 stroke-[1.8] flex-shrink-0" />
+            <AnimatePresence>
+              {!collapsed && (
+                <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="text-[12.5px]">
+                  System Settings
+                </motion.span>
+              )}
+            </AnimatePresence>
+          </NavLink>
+        )}
 
         <div className={`flex items-center gap-3 px-2.5 py-2 rounded-xl bg-white/5 border border-white/5 ${collapsed ? 'justify-center' : ''}`}>
           <div className="relative flex-shrink-0 w-8 h-8">

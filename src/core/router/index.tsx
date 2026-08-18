@@ -20,6 +20,7 @@ const ReportsPage = lazy(() => import('../../modules/reports/pages/ReportsPage')
 const RolesPage = lazy(() => import('../../modules/roles/pages/RolesPage').then(m => ({ default: m.RolesPage })));
 const AuditPage = lazy(() => import('../../modules/audit/pages/AuditPage').then(m => ({ default: m.AuditPage })));
 const SettingsPage = lazy(() => import('../../modules/settings/pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const SuperAdminPage = lazy(() => import('../../modules/superadmin/pages/SuperAdminPage').then(m => ({ default: m.SuperAdminPage })));
 const LoginPage = lazy(() => import('../../modules/auth/pages/LoginPage').then(m => ({ default: m.LoginPage })));
 
 // Loading Skeleton Placeholder for Route Suspense
@@ -37,10 +38,15 @@ const PageFallback = () => (
 
 // Protected Layout: Keeps AppShell (Sidebar & TopBar) permanently mounted
 const ProtectedLayout: React.FC = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // If Super Admin accesses root '/', redirect to Super Admin Dashboard
+  if (user?.roleCode === 'SUPER_ADMIN' && window.location.pathname === '/') {
+    return <Navigate to="/superadmin/dashboard" replace />;
   }
 
   return (
@@ -72,6 +78,13 @@ export const AppRouter: React.FC = () => {
         <Route path="/leave" element={<LeavePage />} />
         <Route path="/payroll" element={<PayrollPage />} />
         <Route path="/reports" element={<ReportsPage />} />
+
+        {/* Super Admin Module Routes */}
+        <Route path="/superadmin" element={<Navigate to="/superadmin/dashboard" replace />} />
+        <Route path="/superadmin/dashboard" element={<SuperAdminPage />} />
+        <Route path="/superadmin/clients" element={<SuperAdminPage />} />
+        <Route path="/superadmin/control" element={<SuperAdminPage />} />
+
         <Route path="/roles" element={<RolesPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/settings" element={<SettingsPage />} />
