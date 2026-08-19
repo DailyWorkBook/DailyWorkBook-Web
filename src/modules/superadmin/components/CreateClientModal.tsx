@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
-import { X, Building2, User, CreditCard, ShieldCheck, CheckCircle2 } from 'lucide-react';
-import { SuperAdminClient, PricingModel, BillingCycle } from '../types';
+import { X, User, ShieldCheck, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import { PricingModel, BillingCycle } from '../types';
 
 interface CreateClientModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateClient: (newClient: SuperAdminClient) => void;
+  onCreateClient: (clientData: any) => Promise<void>;
 }
 
 export const CreateClientModal: React.FC<CreateClientModalProps> = ({
@@ -14,13 +14,15 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
   onCreateClient
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Form State
   const [companyName, setCompanyName] = useState('');
   const [code, setCode] = useState('');
   const [taxId, setTaxId] = useState('');
   const [industry, setIndustry] = useState('Banking & Financial Services');
-  const [billingAddress, setBillingAddress] = useState('');
+  const [billingAddress, setBillingAddress] = useState('Corporate Headquarters, BKC Complex');
   const [city, setCity] = useState('Mumbai');
   const [contactPerson, setContactPerson] = useState('');
   const [contactPhone, setContactPhone] = useState('');
@@ -45,69 +47,58 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
 
   const handleNext = (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
     if (step < 3) setStep((s) => (s + 1) as 1 | 2 | 3);
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!companyName || !contactEmail || !adminEmail) return;
+    setErrorMsg('');
 
-    const generatedId = 'client-' + Date.now();
-    const generatedCode = code || ('CL-' + companyName.substring(0, 4).toUpperCase());
+    if (!companyName) {
+      setErrorMsg('Company Name is required');
+      setStep(1);
+      return;
+    }
 
-    let estMonthly = unitRate;
-    if (pricingModel === 'DAILY') estMonthly = unitRate * 30 * (maxUsersAllowed || 10);
-    else if (pricingModel === 'PER_USER') estMonthly = unitRate * (maxUsersAllowed || 10);
+    if (!adminEmail || !adminName) {
+      setErrorMsg('Admin Name and Email are required');
+      setStep(2);
+      return;
+    }
 
-    const newClient: SuperAdminClient = {
-      id: generatedId,
-      companyName,
+    const payload = {
       name: companyName,
-      clientCode: generatedCode,
-      code: generatedCode,
-      taxId: taxId || '27AAACX1234F1Z0',
-      industry,
-      address: billingAddress || 'Corporate Office Address',
-      billingAddress: billingAddress || 'Corporate Office Address',
-      city,
-      country: 'India',
+      code: code || undefined,
+      taxId: taxId || undefined,
+      industry: industry || 'Banking & Financial Services',
+      billingAddress: billingAddress || 'Corporate Headquarters, BKC Complex',
+      city: city || 'Mumbai',
       contactPerson: contactPerson || adminName || 'Chief Security Officer',
       contactPhone: contactPhone || adminPhone || '+91 98000 00000',
       contactEmail: contactEmail || adminEmail,
-      logoUrl: 'https://images.unsplash.com/photo-1560179707-f14e90ef3623?w=150',
-      status: 'ACTIVE',
-      createdAt: new Date().toISOString().split('T')[0],
-      payments: [],
-      adminAccount: {
-        id: 'adm-' + Date.now(),
-        adminId: 'adm-' + Date.now(),
-        name: adminName || contactPerson || 'Admin User',
-        email: adminEmail,
-        phone: adminPhone || contactPhone || '+91 98000 00000',
-        designation: 'Client Security Admin',
-        status: 'ACTIVE',
-        lastLoginAt: 'Never'
-      },
-      subscription: {
-        planName,
-        pricingModel,
-        unitRate,
-        billingCycle,
-        monthlyEstimatedAmount: estMonthly,
-        startDate,
-        expiryDate,
-        status: 'ACTIVE',
-        maxUsersAllowed,
-        activeUsersCount: 0,
-        autoRenew: true
-      },
-      totalPaidToDate: 0,
-      sitesCount: 0,
-      employeesCount: 0
+      adminName: adminName || contactPerson || 'Admin User',
+      adminEmail: adminEmail,
+      adminPhone: adminPhone || contactPhone || '+91 98000 00000',
+      adminPassword: adminPassword || 'WatchTower@2026',
+      planName: planName || 'Standard Guard Suite',
+      pricingModel: pricingModel || 'MONTHLY',
+      unitRate: Number(unitRate) || 25000,
+      billingCycle: billingCycle || 'MONTHLY',
+      maxUsersAllowed: Number(maxUsersAllowed) || 100,
+      startDate: startDate || new Date().toISOString().split('T')[0],
+      expiryDate: expiryDate || '2027-12-31'
     };
 
-    onCreateClient(newClient);
-    onClose();
+    try {
+      setIsSubmitting(true);
+      await onCreateClient(payload);
+      setIsSubmitting(false);
+      onClose();
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setErrorMsg(err.message || 'Failed to create client organization');
+    }
   };
 
   return (
@@ -129,6 +120,13 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {errorMsg && (
+          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-600 rounded-xl text-xs font-bold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         {/* Step Indicator */}
         <div className="flex items-center justify-between px-4 py-2 bg-bg-surface-2 rounded-xl border border-border/80 text-xs">
@@ -301,14 +299,14 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-txt-primary mb-1">Temporary Initial Password</label>
+                <label className="block text-xs font-bold text-txt-primary mb-1">Initial Password</label>
                 <input
                   type="text"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   className="w-full px-3 py-2 bg-bg-surface border border-border rounded-xl text-sm font-mono text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
                 />
-                <p className="text-[11px] text-txt-secondary mt-1">Admin will be prompted to reset password upon first login.</p>
+                <p className="text-[11px] text-txt-secondary mt-1">Admin will use this password to log in.</p>
               </div>
             </div>
 
@@ -344,7 +342,7 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-txt-primary mb-1">Pricing Model Model</label>
+                <label className="block text-xs font-bold text-txt-primary mb-1">Pricing Model</label>
                 <select
                   value={pricingModel}
                   onChange={(e) => setPricingModel(e.target.value as PricingModel)}
@@ -426,10 +424,20 @@ export const CreateClientModal: React.FC<CreateClientModalProps> = ({
               </button>
               <button
                 type="submit"
-                className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all"
+                disabled={isSubmitting}
+                className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-lg shadow-emerald-600/30 flex items-center gap-2 transition-all disabled:opacity-50"
               >
-                <ShieldCheck className="w-4 h-4" />
-                Create Client & Activate Subscription
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    Onboarding Client...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="w-4 h-4" />
+                    Create Client & Activate Subscription
+                  </>
+                )}
               </button>
             </div>
           </form>

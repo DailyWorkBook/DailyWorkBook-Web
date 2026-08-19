@@ -33,6 +33,11 @@ export interface NavItem {
   section?: string;
 }
 
+export interface SidebarProps {
+  collapsed?: boolean;
+  onToggle?: () => void;
+}
+
 // Super Admin Navigation (Exactly 3 Main Tabs)
 export const superAdminNavItems: NavItem[] = [
   { label: 'Super Admin Dashboard', path: '/superadmin/dashboard', icon: LayoutDashboard, section: 'SUPER ADMIN' },
@@ -58,10 +63,20 @@ export const operationalNavItems: NavItem[] = [
 
 export const navItems = operationalNavItems;
 
-export const Sidebar: React.FC = () => {
+export const Sidebar: React.FC<SidebarProps> = ({ collapsed: controlledCollapsed, onToggle }) => {
   const location = useLocation();
   const { user, logout } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
+  const [internalCollapsed, setInternalCollapsed] = useState(false);
+
+  const collapsed = controlledCollapsed !== undefined ? controlledCollapsed : internalCollapsed;
+
+  const handleToggle = () => {
+    if (onToggle) {
+      onToggle();
+    } else {
+      setInternalCollapsed((prev) => !prev);
+    }
+  };
 
   const isSuperAdmin = user?.roleCode === 'SUPER_ADMIN';
 
@@ -254,8 +269,9 @@ export const Sidebar: React.FC = () => {
 
       {/* Sidebar Collapse Toggle Button */}
       <button
-        onClick={() => setCollapsed(p => !p)}
+        onClick={handleToggle}
         className="absolute -right-3.5 top-16 w-7 h-7 rounded-full bg-bg-surface border border-border shadow-lg flex items-center justify-center text-txt-secondary hover:text-brand-primary hover:border-brand-primary transition-all z-50 hover:scale-110"
+        title={collapsed ? 'Expand Menu' : 'Collapse Menu'}
       >
         {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
       </button>

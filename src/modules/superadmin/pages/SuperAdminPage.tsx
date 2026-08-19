@@ -60,143 +60,90 @@ export const SuperAdminPage: React.FC = () => {
     async function loadData() {
       try {
         setLoading(true);
-        const [clientsData, bypassLogsData, auditLogsData] = await Promise.all([
+        const [cData, tData, bData, aData] = await Promise.all([
           superAdminApi.getClients(),
+          superAdminApi.getPayments(),
           superAdminApi.getImpersonationAuditLogs(),
           superAdminApi.getAuditLogs()
         ]);
-
         if (isMounted) {
-          setClients(clientsData);
-          setBypassLogs(bypassLogsData);
-          setActivityLogs(auditLogsData);
+          setClients(cData || []);
+          setTransactions(tData || []);
+          setBypassLogs(bData || []);
+          setActivityLogs(aData || []);
         }
       } catch (err) {
-        console.error('Failed to fetch Super Admin data from server:', err);
+        console.error('Failed to load Super Admin data:', err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
-
     loadData();
     return () => {
       isMounted = false;
     };
   }, []);
 
-  // Handlers connected to backend API
-  const handleCreateClient = async (clientData: any) => {
+  const handleCreateClient = async (data: any) => {
     try {
-      const newClient = await superAdminApi.createClient(clientData);
-      setClients((prev) => [newClient, ...prev]);
-
-      const newActivity: SuperAdminActivityLog = {
-        id: 'sal-' + Date.now(),
-        timestamp: new Date().toLocaleString(),
-        actor: user?.name || 'Super Admin',
-        actorName: user?.name || 'Super Admin',
-        action: 'CLIENT_CREATED',
-        category: 'CLIENT',
-        details: `Created new client ${newClient.companyName || newClient.name} (${newClient.clientCode || newClient.code}) with plan ${newClient.subscription?.planName || 'Standard Suite'}`,
-        targetClient: newClient.companyName || newClient.name
-      };
-      setActivityLogs((prev) => [newActivity, ...prev]);
+      const created = await superAdminApi.createClient(data);
+      setClients((prev) => [created, ...prev]);
+      setIsCreateClientOpen(false);
     } catch (err) {
-      console.error('Error creating client:', err);
+      console.error('Failed to create client:', err);
     }
   };
 
-  const handleRecordPayment = async (txData: any) => {
+  const handleRecordPayment = async (data: any) => {
     try {
-      const tx = await superAdminApi.recordPayment(txData);
-      setTransactions((prev) => [tx, ...prev]);
-
-      if (tx.status === 'PAID') {
-        setClients((prev) =>
-          prev.map((c) =>
-            c.id === tx.clientId
-              ? { ...c, totalPaidToDate: (c.totalPaidToDate || 0) + tx.amount }
-              : c
-          )
-        );
-      }
-
-      const newActivity: SuperAdminActivityLog = {
-        id: 'sal-' + Date.now(),
-        timestamp: new Date().toLocaleString(),
-        actor: user?.name || 'Super Admin',
-        actorName: user?.name || 'Super Admin',
-        action: 'PAYMENT_RECORDED',
-        category: 'BILLING',
-        details: `Recorded payment of ₹${tx.amount.toLocaleString('en-IN')} for ${tx.clientName || 'Client'} (${tx.invoiceNumber})`,
-        targetClient: tx.clientName
-      };
-      setActivityLogs((prev) => [newActivity, ...prev]);
-    } catch (err) {
-      console.error('Error recording payment:', err);
-    }
-  };
-
-  const handleToggleStatus = async (clientId: string) => {
-    const target = clients.find((c) => c.id === clientId);
-    if (!target) return;
-
-    const nextStatus = target.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    try {
-      await superAdminApi.toggleClientStatus(clientId, nextStatus);
-
+      const recorded = await superAdminApi.recordPayment(data);
+      setTransactions((prev) => [recorded, ...prev]);
+      // Update local client paid amount
       setClients((prev) =>
         prev.map((c) => {
-          if (c.id === clientId) {
+          if (c.id === data.clientId) {
             return {
               ...c,
-              status: nextStatus,
-              adminAccount: { ...c.adminAccount, status: nextStatus }
+              totalPaidToDate: (c.totalPaidToDate || 0) + data.amount
             };
           }
           return c;
         })
       );
+      setIsRecordPaymentOpen(false);
     } catch (err) {
-      console.error('Error toggling client status:', err);
+      console.error('Failed to record payment:', err);
     }
   };
 
-  const handleUpdateClient = async (updated: SuperAdminClient) => {
+  const handleToggleStatus = async (clientId: string) => {
     try {
-      await superAdminApi.updateClient(updated.id, updated);
-      setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+      const target = clients.find((c) => c.id === clientId);
+      const newStatus = target?.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+      const updated = await superAdminApi.toggleClientStatus(clientId, newStatus);
+      setClients((prev) => prev.map((c) => (c.id === clientId ? updated : c)));
     } catch (err) {
-      console.error('Error updating client:', err);
+      console.error('Failed to toggle client status:', err);
+    }
+  };
+
+  const handleUpdateClient = async (updatedClient: SuperAdminClient) => {
+    try {
+      const saved = await superAdminApi.updateClient(updatedClient.id, updatedClient);
+      setClients((prev) => prev.map((c) => (c.id === updatedClient.id ? saved : c)));
+    } catch (err) {
+      console.error('Failed to update client:', err);
     }
   };
 
   const handleInitiateBypassInNewTab = async (client: SuperAdminClient, reason: string) => {
     try {
-      const res = await superAdminApi.initiateImpersonation(client.id, reason);
+      const clientNameStr = client.companyName || client.name;
+      await superAdminApi.initiateImpersonation(client.id, reason);
 
-      const clientNameStr = client.companyName || client.name || 'Client Org';
-
-      const bypassLog: BypassAuditLog = {
-        id: res.session?.id || 'bpl-' + Date.now(),
-        superAdminId: user?.id || 'sa-1',
-        superAdminName: user?.name || 'Alex Morgan',
-        superAdminEmail: user?.email || 'superadmin@watchtower.dev',
-        adminId: client.adminAccount.adminId || client.adminAccount.id,
-        targetAdminName: client.adminAccount.name,
-        adminEmail: client.adminAccount.email,
-        clientId: client.id,
-        clientName: clientNameStr,
-        reason,
-        startTime: new Date().toLocaleString(),
-        sessionStatus: 'ACTIVE',
-        timestamp: new Date().toISOString(),
-        ipAddress: '103.21.124.89 (Current Session)',
-        durationMinutes: 60,
-        actionsTaken: ['INITIATE_SESSION']
-      };
-
-      setBypassLogs((prev) => [bypassLog, ...prev]);
+      // Reload logs
+      const freshLogs = await superAdminApi.getImpersonationAuditLogs();
+      setBypassLogs(freshLogs || []);
 
       startBypassSession(
         {
@@ -216,34 +163,38 @@ export const SuperAdminPage: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Module Title Header */}
+      {/* Module Title Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/80 pb-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-600 font-mono text-xs font-bold flex items-center gap-1">
-              <Crown className="w-4 h-4 text-indigo-500" /> SUPER ADMIN MODULE
+              <Crown className="w-4 h-4 text-indigo-500" /> SUPER ADMIN CONTROL
             </span>
             <span className="text-xs text-txt-secondary">&bull; Isolated Platform Management</span>
           </div>
           <h1 className="text-2xl font-black text-txt-primary tracking-tight mt-1">
-            Super Admin Control Center
+            {activeTab === 'dashboard' && 'Super Admin Dashboard'}
+            {activeTab === 'clients' && 'Platform Client Management'}
+            {activeTab === 'control' && 'Super Admin Control Center'}
           </h1>
           <p className="text-xs text-txt-secondary mt-0.5">
-            Platform-level analytics, client fleet management, pricing structures, and passwordless Admin login control.
+            {activeTab === 'dashboard' && 'Global platform metrics, client fleet growth, subscription health, and financial telemetry.'}
+            {activeTab === 'clients' && 'Provision client organizations, update pricing tiers, manage admin credentials, and audit client status.'}
+            {activeTab === 'control' && 'Audit logs, passwordless tenant admin access, and platform security bypass control.'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => setIsCreateClientOpen(true)}
-            className="px-4 py-2 bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all"
+            className="px-4 py-2 bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             Add New Client
           </button>
           <button
             onClick={() => setIsRecordPaymentOpen(true)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all"
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-md flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
           >
             <DollarSign className="w-4 h-4" />
             Record Payment
@@ -251,42 +202,47 @@ export const SuperAdminPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main 3 Super Admin Menu Tabs */}
+      {/* Main 3 Super Admin Menu Navigation Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto border-b border-border/80 pb-2 scrollbar-none">
         <button
           onClick={() => handleTabChange('dashboard')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === 'dashboard'
               ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20'
               : 'text-txt-secondary hover:text-txt-primary hover:bg-bg-surface-2'
           }`}
         >
           <LayoutDashboard className="w-4 h-4" />
-          1. Super Admin Dashboard
+          Dashboard
         </button>
 
         <button
           onClick={() => handleTabChange('clients')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === 'clients'
               ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20'
               : 'text-txt-secondary hover:text-txt-primary hover:bg-bg-surface-2'
           }`}
         >
           <Building2 className="w-4 h-4" />
-          2. Client Management ({clients.length})
+          Client Management
+          <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-extrabold ${
+            activeTab === 'clients' ? 'bg-white/20 text-white' : 'bg-bg-surface-2 text-txt-secondary'
+          }`}>
+            {clients.length}
+          </span>
         </button>
 
         <button
           onClick={() => handleTabChange('control')}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === 'control'
               ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
               : 'text-txt-secondary hover:text-txt-primary hover:bg-bg-surface-2'
           }`}
         >
-          <ShieldAlert className="w-4 h-4 text-amber-300" />
-          3. Super Admin Control (Login in New Tab)
+          <ShieldAlert className="w-4 h-4" />
+          Super Admin Control
         </button>
       </div>
 

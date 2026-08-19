@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useAuth } from '../../core/auth';
-import { ShieldAlert, LogOut, Lock } from 'lucide-react';
+import { ShieldAlert, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export interface AppShellProps {
@@ -10,6 +10,7 @@ export interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
+  const [collapsed, setCollapsed] = useState(false);
   const { isImpersonating, impersonatedSession, exitBypassSession } = useAuth();
   const navigate = useNavigate();
 
@@ -20,10 +21,12 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
   return (
     <div className="min-h-screen bg-bg-app text-txt-primary flex flex-col md:flex-row transition-colors">
-      <Sidebar />
-      {/* Main content area — pushes right of sidebar */}
+      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed((p) => !p)} />
+      {/* Main content area — expands smoothly when sidebar collapses */}
       <div
-        className="flex-1 md:pl-[240px] flex flex-col min-w-0 transition-all duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]"
+        className={`flex-1 ${
+          collapsed ? 'md:pl-[74px]' : 'md:pl-[250px]'
+        } flex flex-col min-w-0 transition-all duration-220 ease-[cubic-bezier(0.22,1,0.36,1)]`}
         id="main-content-area"
       >
         {/* Sticky Impersonation Bypass Banner */}
