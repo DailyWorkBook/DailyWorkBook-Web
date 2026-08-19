@@ -1,252 +1,437 @@
-import React, { useState, useEffect } from 'react';
-import { KeyRound, Shield, Plus, Trash2, CheckCircle2, Loader2, AlertCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertCircle, CheckCircle2, KeyRound, Plus, Shield, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
-import { rolesApi } from '../../../services/rolesApi';
-
-const AVAILABLE_PERMISSIONS = [
-  { code: 'MANAGE_SITES', label: 'Manage Sites & Security Posts' },
-  { code: 'MANAGE_EMPLOYEES', label: 'Onboard & Manage Security Guards' },
-  { code: 'APPROVE_ATTENDANCE', label: 'Approve Exceptions & Manual Punches' },
-  { code: 'MANAGE_ROSTER', label: 'Define Shifts & Guard Roster' },
-  { code: 'RUN_PAYROLL', label: 'View & Run Salary Payroll' },
-  { code: 'VIEW_REPORTS', label: 'View Attendance & Compliance Analytics' },
-  { code: 'MANAGE_ROLES', label: 'Manage Custom Roles & RBAC Matrix' },
-  { code: 'MANAGE_SETTINGS', label: 'Configure Geofence & System Parameters' },
-  { code: 'PERFORM_CHECKIN', label: 'Perform Field GPS/QR Punch Check-ins' },
-  { code: 'VIEW_SELF_ROSTER', label: 'View Personal Shift Schedule' }
-];
+import { ConfirmDialog, PageHeader, Pagination, SearchInput } from '../../../components/data';
+import { EmptyState, ErrorState, LoadingState } from '../../../components/feedback/States';
+import { useAuth } from '../../../core/auth';
+import { queryKeys } from '../../../core/query';
+import { catalogApi, rolesApi, type Role } from '../../../services';
+import { describeApiError } from '../../../hooks/useApiErrorMessage';
+import { useDebounced, useToast } from '../../../hooks';
 
 export const RolesPage: React.FC = () => {
-  const [roles, setRoles] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const { can } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
 
-  // Form State
-  const [name, setName] = useState('');
-  const [code, setCode] = useState('');
-  const [description, setDescription] = useState('');
-  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([
-    'VIEW_SITES',
-    'VIEW_EMPLOYEES',
-    'APPROVE_ATTENDANCE'
-  ]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounced(search);
 
-  useEffect(() => {
-    loadRoles();
-  }, []);
+  const [isFormOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Role | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Role | null>(null);
 
-  async function loadRoles() {
-    try {
-      setLoading(true);
-      const data = await rolesApi.getRoles();
-      setRoles(data || []);
-    } catch (err) {
-      console.error('Error loading roles:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const params = { page, pageSize, q: debouncedSearch || undefined, sort: 'createdAt', order: 'asc' as const };
 
-  const togglePermission = (permCode: string) => {
-    setSelectedPermissions((prev) =>
-      prev.includes(permCode) ? prev.filter((p) => p !== permCode) : [...prev, permCode]
-    );
+  const roles = useQuery({
+    queryKey: queryKeys.roles(params),
+    queryFn: () => rolesApi.list(params),
+  });
+
+  // The permission matrix comes from the API, narrowed to the modules this
+  // workspace owns — so a role can never be built around a capability the
+  // module gate would then strip.
+  const permissionGroups = useQuery({
+    queryKey: queryKeys.catalogPermissions,
+    queryFn: () => catalogApi.assignablePermissions(),
+    staleTime: 5 * 60_000,
+  });
+
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ['roles'] });
+    void queryClient.invalidateQueries({ queryKey: ['employees'] });
+    void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
   };
 
-  const handleCreateRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name || !code) return;
-    setErrorMsg('');
-    try {
-      const newRole = await rolesApi.createRole({
-        name,
-        code,
-        description,
-        permissions: selectedPermissions
-      });
-      setRoles((prev) => [...prev, newRole]);
-      setIsModalOpen(false);
-      setName('');
-      setCode('');
-      setDescription('');
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to create custom role');
-    }
+  const removeRole = useMutation({
+    mutationFn: (role: Role) => rolesApi.remove(role.id),
+    onSuccess: (_, role) => {
+      toast.success('Role removed', `${role.name} is no longer available.`);
+      setPendingDelete(null);
+      invalidate();
+    },
+    onError: (error) => toast.error('Could not remove the role', describeApiError(error)),
+  });
+
+  const openCreate = () => {
+    setEditing(null);
+    setFormOpen(true);
   };
 
-  const handleDeleteRole = async (id: string) => {
-    try {
-      await rolesApi.deleteRole(id);
-      setRoles((prev) => prev.filter((r) => r.id !== id));
-    } catch (err: any) {
-      alert(err.message || 'Failed to delete role');
-    }
+  const openEdit = (role: Role) => {
+    setEditing(role);
+    setFormOpen(true);
   };
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Title Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold flex items-center gap-1">
-              <KeyRound className="w-4 h-4 text-brand-primary" /> ROLE-BASED ACCESS CONTROL (RBAC)
-            </span>
-          </div>
-          <h1 className="text-2xl font-black text-txt-primary tracking-tight mt-1">
-            Organization Roles & Permissions ({roles.length})
-          </h1>
-        </div>
+      <PageHeader
+        eyebrow="Role-based access control"
+        eyebrowIcon={<KeyRound className="w-3.5 h-3.5" aria-hidden />}
+        title="Roles & access"
+        description="Roles decide what each person can do. At least one role must exist before employees can be added."
+        actions={
+          can('ROLE_CREATE') ? (
+            <Button onClick={openCreate} leftIcon={<Plus className="w-4 h-4" aria-hidden />}>
+              Create role
+            </Button>
+          ) : undefined
+        }
+      />
 
-        <Button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Create Custom Role
-        </Button>
-      </div>
+      <SearchInput
+        value={search}
+        onChange={(value) => {
+          setSearch(value);
+          setPage(1);
+        }}
+        placeholder="Search roles by name or code…"
+        className="max-w-md"
+        label="Search roles"
+      />
 
-      {loading && (
-        <div className="flex items-center justify-center p-8 gap-2 text-txt-secondary text-xs">
-          <Loader2 className="w-5 h-5 animate-spin text-brand-primary" /> Loading RBAC permission matrix from database...
-        </div>
-      )}
-
-      {!loading && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {roles.map((role) => (
-            <div key={role.id} className="bg-bg-surface border border-border rounded-2xl p-5 shadow-sm space-y-3 flex flex-col justify-between">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-extrabold text-sm text-txt-primary">{role.name}</h3>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-brand-primary/10 text-brand-primary font-mono">
-                      {role.code}
-                    </span>
-                    {!role.isSystem && (
+      {roles.isLoading ? (
+        <LoadingState label="Loading roles…" />
+      ) : roles.isError ? (
+        <ErrorState message={describeApiError(roles.error)} onRetry={() => void roles.refetch()} />
+      ) : roles.data!.data.length === 0 ? (
+        <EmptyState
+          icon={KeyRound}
+          title={debouncedSearch ? 'No roles match that search' : 'No roles configured yet'}
+          description={
+            debouncedSearch
+              ? 'Try a different name or code.'
+              : 'A role is a named set of permissions. Create the first one — employees cannot be onboarded until at least one exists.'
+          }
+          action={
+            !debouncedSearch && can('ROLE_CREATE')
+              ? { label: 'Create the first role', onClick: openCreate, icon: <Plus className="w-3.5 h-3.5" /> }
+              : undefined
+          }
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {roles.data!.data.map((role) => (
+              <article
+                key={role.id}
+                className="bg-bg-surface border border-border rounded-2xl p-5 shadow-sm flex flex-col gap-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="font-extrabold text-sm text-txt-primary truncate">{role.name}</h2>
+                    <span className="text-[10px] font-mono font-bold text-brand-primary">{role.code}</span>
+                  </div>
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {!role.isActive && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-bg-surface-2 text-txt-secondary border border-border">
+                        Inactive
+                      </span>
+                    )}
+                    {can('ROLE_UPDATE') && (
                       <button
-                        onClick={() => handleDeleteRole(role.id)}
-                        className="text-rose-500 hover:text-rose-700 p-1 rounded-md hover:bg-rose-500/10 transition-colors"
-                        title="Delete Role"
+                        onClick={() => openEdit(role)}
+                        className="text-[10px] font-bold text-brand-primary hover:underline px-1"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        Edit
+                      </button>
+                    )}
+                    {can('ROLE_DELETE') && !role.isSystem && (
+                      <button
+                        onClick={() => setPendingDelete(role)}
+                        aria-label={`Delete ${role.name}`}
+                        className="text-status-absent hover:text-status-absent p-1 rounded-md hover:bg-status-absent/10 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" aria-hidden />
                       </button>
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-txt-secondary">{role.description || 'Custom organization role'}</p>
-                <div className="pt-2 border-t border-border/60">
-                  <span className="text-[11px] font-bold text-txt-secondary">Granted Permissions:</span>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {role.permissions?.map((p: string, i: number) => (
-                      <span key={i} className="px-2 py-0.5 rounded-md text-[9px] font-mono bg-bg-surface-2 text-txt-primary border border-border">
-                        {p}
+
+                <p className="text-xs text-txt-secondary leading-relaxed flex-1">
+                  {role.description || 'No description provided.'}
+                </p>
+
+                <div className="pt-2 border-t border-border/60 space-y-2">
+                  <span className="text-[11px] font-bold text-txt-secondary">
+                    {role.permissions.length} permission{role.permissions.length === 1 ? '' : 's'}
+                  </span>
+                  <div className="flex flex-wrap gap-1">
+                    {role.permissions.slice(0, 6).map((permission) => (
+                      <span
+                        key={permission.code}
+                        title={`${permission.moduleName} · ${permission.name}`}
+                        className="px-2 py-0.5 rounded-md text-[9px] font-mono bg-bg-surface-2 text-txt-primary border border-border"
+                      >
+                        {permission.code}
                       </span>
                     ))}
+                    {role.permissions.length > 6 && (
+                      <span className="px-2 py-0.5 rounded-md text-[9px] font-mono text-txt-secondary">
+                        +{role.permissions.length - 6} more
+                      </span>
+                    )}
                   </div>
                 </div>
-              </div>
 
-              {role.isSystem && (
-                <div className="pt-2 text-[10px] font-mono text-txt-secondary flex items-center gap-1">
-                  <Shield className="w-3 h-3 text-emerald-500" /> Default System Role
+                <div className="flex items-center gap-3 text-[10px] text-txt-secondary font-mono pt-1 border-t border-border/60">
+                  <span className="flex items-center gap-1">
+                    <Shield className="w-3 h-3" aria-hidden /> {role.usage.employees} employee
+                    {role.usage.employees === 1 ? '' : 's'}
+                  </span>
+                  <span>{role.usage.users} login{role.usage.users === 1 ? '' : 's'}</span>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="bg-bg-surface border border-border rounded-2xl">
+            <Pagination
+              meta={roles.data!.meta}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              label="roles"
+            />
+          </div>
+        </>
       )}
 
-      {/* Create Role Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-bg-surface border border-border rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-txt-primary border-b border-border pb-3">
-              Create Custom Organization Role
-            </h3>
+      {isFormOpen && (
+        <RoleFormDialog
+          role={editing}
+          permissionGroups={permissionGroups.data ?? []}
+          isLoadingPermissions={permissionGroups.isLoading}
+          onClose={() => setFormOpen(false)}
+          onSaved={() => {
+            setFormOpen(false);
+            invalidate();
+          }}
+        />
+      )}
 
-            {errorMsg && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 rounded-xl text-xs font-bold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4" /> {errorMsg}
+      <ConfirmDialog
+        isOpen={pendingDelete !== null}
+        title={`Delete ${pendingDelete?.name ?? 'this role'}?`}
+        message="This cannot be undone. Roles still assigned to an employee or a login cannot be deleted."
+        confirmLabel="Delete role"
+        tone="destructive"
+        isBusy={removeRole.isPending}
+        onConfirm={() => pendingDelete && removeRole.mutate(pendingDelete)}
+        onCancel={() => setPendingDelete(null)}
+      />
+    </div>
+  );
+};
+
+interface RoleFormDialogProps {
+  role: Role | null;
+  permissionGroups: { moduleCode: string; moduleName: string; permissions: { code: string; name: string; description: string | null }[] }[];
+  isLoadingPermissions: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+const RoleFormDialog: React.FC<RoleFormDialogProps> = ({
+  role,
+  permissionGroups,
+  isLoadingPermissions,
+  onClose,
+  onSaved,
+}) => {
+  const toast = useToast();
+  const isEditing = role !== null;
+
+  const [name, setName] = useState(role?.name ?? '');
+  const [code, setCode] = useState(role?.code ?? '');
+  const [description, setDescription] = useState(role?.description ?? '');
+  const [selected, setSelected] = useState<string[]>(role?.permissionCodes ?? []);
+  const [error, setError] = useState('');
+
+  const save = useMutation({
+    mutationFn: () =>
+      isEditing
+        ? rolesApi.update(role!.id, { name, description: description || null, permissionCodes: selected })
+        : rolesApi.create({ name, code, description: description || undefined, permissionCodes: selected }),
+    onSuccess: () => {
+      toast.success(isEditing ? 'Role updated' : 'Role created', `${name} is ready to assign.`);
+      onSaved();
+    },
+    onError: (caught) => setError(describeApiError(caught)),
+  });
+
+  const togglePermission = (permissionCode: string) => {
+    setSelected((current) =>
+      current.includes(permissionCode)
+        ? current.filter((item) => item !== permissionCode)
+        : [...current, permissionCode],
+    );
+  };
+
+  const toggleModule = (moduleCode: string) => {
+    const group = permissionGroups.find((item) => item.moduleCode === moduleCode);
+    if (!group) return;
+    const codes = group.permissions.map((permission) => permission.code);
+    const allSelected = codes.every((permissionCode) => selected.includes(permissionCode));
+    setSelected((current) =>
+      allSelected
+        ? current.filter((permissionCode) => !codes.includes(permissionCode))
+        : [...new Set([...current, ...codes])],
+    );
+  };
+
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    if (selected.length === 0) {
+      setError('A role needs at least one permission.');
+      return;
+    }
+    save.mutate();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="bg-bg-surface border border-border rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+        <div className="border-b border-border pb-3">
+          <h2 className="text-base font-bold text-txt-primary">{isEditing ? `Edit ${role!.name}` : 'Create a role'}</h2>
+          <p className="text-xs text-txt-secondary mt-0.5">
+            Choose the permissions this role grants. Only the modules your organisation owns are listed.
+          </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="p-3 rounded-xl bg-status-absent/10 border border-status-absent/25 text-status-absent text-xs font-semibold flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" aria-hidden />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={submit} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="role-name" className="block text-xs font-bold text-txt-secondary mb-1">
+                Role name <span className="text-status-absent">*</span>
+              </label>
+              <input
+                id="role-name"
+                required
+                value={name}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  if (!isEditing) setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]+/g, '_'));
+                }}
+                placeholder="Shift Supervisor"
+                className="w-full px-3 py-2 bg-bg-surface-2 border border-border rounded-xl text-sm text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+              />
+            </div>
+            <div>
+              <label htmlFor="role-code" className="block text-xs font-bold text-txt-secondary mb-1">
+                Role code <span className="text-status-absent">*</span>
+              </label>
+              <input
+                id="role-code"
+                required
+                disabled={isEditing}
+                value={code}
+                onChange={(event) => setCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]+/g, '_'))}
+                placeholder="SHIFT_SUPERVISOR"
+                className="w-full px-3 py-2 bg-bg-surface-2 border border-border rounded-xl text-sm font-mono text-txt-primary disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="role-description" className="block text-xs font-bold text-txt-secondary mb-1">
+              Description
+            </label>
+            <input
+              id="role-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="What this role is responsible for"
+              className="w-full px-3 py-2 bg-bg-surface-2 border border-border rounded-xl text-sm text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+            />
+          </div>
+
+          <fieldset className="space-y-3">
+            <legend className="text-xs font-bold text-txt-secondary mb-1">
+              Permissions ({selected.length} selected)
+            </legend>
+
+            {isLoadingPermissions ? (
+              <LoadingState label="Loading the permission matrix…" />
+            ) : permissionGroups.length === 0 ? (
+              <p className="text-xs text-txt-secondary p-4 bg-bg-surface-2 rounded-xl">
+                No modules are assigned to this organisation, so there is nothing to grant yet.
+              </p>
+            ) : (
+              <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                {permissionGroups.map((group) => {
+                  const codes = group.permissions.map((permission) => permission.code);
+                  const allSelected = codes.every((permissionCode) => selected.includes(permissionCode));
+
+                  return (
+                    <div key={group.moduleCode} className="border border-border rounded-xl overflow-hidden">
+                      <div className="flex items-center justify-between px-3 py-2 bg-bg-surface-2 border-b border-border">
+                        <span className="text-[11px] font-bold text-txt-primary">{group.moduleName}</span>
+                        <button
+                          type="button"
+                          onClick={() => toggleModule(group.moduleCode)}
+                          className="text-[10px] font-bold text-brand-primary hover:underline"
+                        >
+                          {allSelected ? 'Clear all' : 'Select all'}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-2">
+                        {group.permissions.map((permission) => {
+                          const isChecked = selected.includes(permission.code);
+                          return (
+                            <label
+                              key={permission.code}
+                              className={`p-2 rounded-lg border text-[11px] cursor-pointer flex items-start justify-between gap-2 transition-colors ${
+                                isChecked
+                                  ? 'border-brand-primary bg-brand-primary/10 text-brand-primary font-bold'
+                                  : 'border-border bg-bg-surface hover:border-brand-primary/40 text-txt-secondary'
+                              }`}
+                            >
+                              <span className="min-w-0">
+                                <input
+                                  type="checkbox"
+                                  className="sr-only"
+                                  checked={isChecked}
+                                  onChange={() => togglePermission(permission.code)}
+                                />
+                                <span className="block">{permission.name}</span>
+                                <span className="block text-[9px] font-mono opacity-70">{permission.code}</span>
+                              </span>
+                              {isChecked && <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" aria-hidden />}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
+          </fieldset>
 
-            <form onSubmit={handleCreateRole} className="space-y-4 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="font-bold text-txt-secondary">Role Title</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Senior Shift Supervisor"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      if (!code) setCode(e.target.value.toUpperCase().replace(/\s+/g, '_'));
-                    }}
-                    className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="font-bold text-txt-secondary">Role Code</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. SHIFT_SUP_SR"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.toUpperCase().replace(/\s+/g, '_'))}
-                    className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary font-mono"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="font-bold text-txt-secondary">Description</label>
-                <input
-                  type="text"
-                  placeholder="Describe responsibility scope..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                />
-              </div>
-
-              <div>
-                <label className="font-bold text-txt-secondary block mb-2">Assign Permissions</label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                  {AVAILABLE_PERMISSIONS.map((perm) => {
-                    const isChecked = selectedPermissions.includes(perm.code);
-                    return (
-                      <div
-                        key={perm.code}
-                        onClick={() => togglePermission(perm.code)}
-                        className={`p-2 rounded-xl border text-xs cursor-pointer flex items-center justify-between transition-colors ${
-                          isChecked
-                            ? 'border-brand-primary bg-brand-primary/10 text-brand-primary font-bold'
-                            : 'border-border bg-bg-surface-2 text-txt-secondary hover:text-txt-primary'
-                        }`}
-                      >
-                        <span className="text-[11px]">{perm.label}</span>
-                        {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-brand-primary flex-shrink-0" />}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-brand-primary text-white font-bold">
-                  Save Role
-                </Button>
-              </div>
-            </form>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <Button type="button" variant="outline" onClick={onClose} disabled={save.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={save.isPending}>
+              {isEditing ? 'Save changes' : 'Create role'}
+            </Button>
           </div>
-        </div>
-      )}
+        </form>
+      </div>
     </div>
   );
 };

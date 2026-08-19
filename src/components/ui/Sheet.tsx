@@ -5,7 +5,8 @@ import { X } from 'lucide-react';
 export interface SheetProps {
   isOpen: boolean;
   onClose: () => void;
-  title: string;
+  /** Omit when the content supplies its own header, as the mobile nav does. */
+  title?: string;
   children: React.ReactNode;
   side?: 'right' | 'left';
 }
@@ -55,19 +56,24 @@ export const Sheet: React.FC<SheetProps> = ({
             animate={sideVariants[side].animate}
             exit={sideVariants[side].exit}
             transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className={`relative ${side === 'right' ? 'ml-auto' : 'mr-auto'} w-full max-w-lg bg-bg-surface border-l border-border h-full shadow-2xl z-10 flex flex-col`}
+            role="dialog"
+            aria-modal="true"
+            className={`relative ${side === 'right' ? 'ml-auto' : 'mr-auto'} w-full max-w-lg bg-bg-surface ${side === 'right' ? 'border-l' : 'border-r'} border-border h-full shadow-2xl z-10 flex flex-col`}
           >
-            <div className="flex items-center justify-between p-6 border-b border-border">
-              <h3 className="text-lg font-bold text-txt-primary">{title}</h3>
-              <button
-                onClick={onClose}
-                className="p-1.5 text-txt-secondary hover:text-txt-primary rounded-lg hover:bg-bg-surface-2 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+            {title && (
+              <div className="flex items-center justify-between p-6 border-b border-border">
+                <h3 className="text-lg font-bold text-txt-primary">{title}</h3>
+                <button
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="p-1.5 text-txt-secondary hover:text-txt-primary rounded-lg hover:bg-bg-surface-2 transition-colors"
+                >
+                  <X className="w-5 h-5" aria-hidden />
+                </button>
+              </div>
+            )}
 
-            <div className="flex-1 overflow-y-auto p-6">{children}</div>
+            <div className={`flex-1 overflow-y-auto ${title ? 'p-6' : ''}`}>{children}</div>
           </motion.div>
         </div>
       )}

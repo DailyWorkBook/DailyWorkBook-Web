@@ -1,51 +1,54 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useReducedMotion } from '../../core/motion';
 
 interface CountUpProps {
   end: number;
-  duration?: number; // ms
+  duration?: number;
   prefix?: string;
   suffix?: string;
   className?: string;
 }
 
+/**
+ * Animates a number up to its target. Under `prefers-reduced-motion` the value
+ * appears immediately — the figure is the point, the animation is decoration.
+ */
 export const CountUp: React.FC<CountUpProps> = ({
   end,
   duration = 800,
   prefix = '',
   suffix = '',
-  className = ''
+  className = '',
 }) => {
-  const [count, setCount] = useState(0);
   const shouldReduceMotion = useReducedMotion();
+  // Starting at the target means the correct number is painted on the very
+  // first frame; the animation then rewinds and plays only if motion is allowed.
+  const [count, setCount] = useState(end);
+  const frameRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (shouldReduceMotion) {
-      setCount(end);
-      return;
-    }
+    if (shouldReduceMotion) return;
 
     let startTimestamp: number | null = null;
-    const startValue = 0;
 
     const step = (timestamp: number) => {
-      if (!startTimestamp) startTimestamp = timestamp;
+      if (startTimestamp === null) startTimestamp = timestamp;
       const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-
-      // Ease out quad
-      const easedProgress = 1 - (1 - progress) * (1 - progress);
-      const current = Math.floor(startValue + (end - startValue) * easedProgress);
-
-      setCount(current);
+      const eased = 1 - (1 - progress) * (1 - progress);
+      setCount(Math.floor(end * eased));
 
       if (progress < 1) {
-        requestAnimationFrame(step);
+        frameRef.current = requestAnimationFrame(step);
       } else {
         setCount(end);
       }
     };
 
-    requestAnimationFrame(step);
+    frameRef.current = requestAnimationFrame(step);
+
+    return () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    };
   }, [end, duration, shouldReduceMotion]);
 
   return (

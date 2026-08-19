@@ -1,199 +1,121 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authApi } from '../../services/authApi';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { ApiError, authApi, setSessionExpiredHandler, tokenStore, type SessionUser } from '../../services';
 
-export interface User {
-  id?: string;
-  name: string;
-  email: string;
-  role: string;
-  avatarUrl: string;
-  roleCode?: string;
-  tenantId?: string;
-  tenantName?: string;
-}
+/**
+ * Session state for the whole app.
+ *
+ * The user object is re-read from `/auth/me` on every load rather than trusted
+ * from storage, so a revoked account or a changed role takes effect on the next
+ * page load instead of persisting in a stale copy.
+ */
 
-export interface ImpersonatedSession {
-  adminName: string;
-  adminEmail: string;
-  clientName: string;
-  clientId: string;
-  reason: string;
-  bypassLogId: string;
-  startTime: string;
-}
-
-interface AuthContextType {
-  user: User | null;
+export interface AuthContextValue {
+  user: SessionUser | null;
+  status: 'loading' | 'authenticated' | 'anonymous';
   isAuthenticated: boolean;
-  isImpersonating: boolean;
-  impersonatedSession: ImpersonatedSession | null;
-  login: (email: string, pass: string) => Promise<boolean>;
-  logout: () => void;
-  startBypassSession: (targetAdmin: { name: string; email: string; clientName: string; clientId: string; adminId: string }, reason: string, openNewTab?: boolean) => void;
-  exitBypassSession: () => void;
+  isSuperAdmin: boolean;
+  login: (email: string, password: string) => Promise<SessionUser>;
+  logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
+  /** True when the workspace owns the module. Platform operators own none. */
+  hasModule: (moduleCode: string) => boolean;
+  /** True when the signed-in role grants the permission. */
+  can: (permissionCode: string) => boolean;
+  canAny: (permissionCodes: string[]) => boolean;
 }
 
-const STORAGE_KEY = 'wt_session_v2';
-const IMPERSONATE_KEY = 'wt_impersonate_v1';
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Check URL search params for new tab impersonation launch
-  const urlParams = new URLSearchParams(window.location.search);
-  const bypassSessionId = urlParams.get('bypassSessionId');
-  const targetAdminName = urlParams.get('adminName');
-  const targetAdminEmail = urlParams.get('adminEmail');
-  const targetClientName = urlParams.get('clientName');
-  const targetClientId = urlParams.get('clientId');
-  const bypassReason = urlParams.get('reason');
-
-  const initialImpersonation: ImpersonatedSession | null = bypassSessionId
-    ? {
-        adminName: targetAdminName || 'Client Admin',
-        adminEmail: targetAdminEmail || 'admin@client.com',
-        clientName: targetClientName || 'Client Organization',
-        clientId: targetClientId || 'client-1',
-        reason: bypassReason || 'Super Admin Troubleshooting',
-        bypassLogId: bypassSessionId,
-        startTime: new Date().toLocaleString()
-      }
-    : null;
-
-  const [impersonatedSession, setImpersonatedSession] = useState<ImpersonatedSession | null>(() => {
-    if (initialImpersonation) {
-      sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(initialImpersonation));
-      return initialImpersonation;
-    }
-    try {
-      const saved = sessionStorage.getItem(IMPERSONATE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const [user, setUser] = useState<User | null>(() => {
-    if (initialImpersonation) {
-      return {
-        name: initialImpersonation.adminName,
-        email: initialImpersonation.adminEmail,
-        role: `Client Admin (${initialImpersonation.clientName})`,
-        roleCode: 'ORG_ADMIN',
-        avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'
-      };
-    }
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  const saveUser = (u: User | null) => {
-    setUser(u);
-    if (u) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  };
-
-  const login = async (email: string, pass: string): Promise<boolean> => {
-    const res = await authApi.login(email, pass);
-    if (res.token) {
-      localStorage.setItem('token', res.token);
-    }
-    if (res.user) {
-      saveUser(res.user);
-      return true;
-    }
-    throw new Error('Invalid login response from server');
-  };
-
-  const logout = () => {
-    saveUser(null);
-    setImpersonatedSession(null);
-    sessionStorage.removeItem(IMPERSONATE_KEY);
-    localStorage.removeItem('token');
-  };
-
-  const startBypassSession = (
-    targetAdmin: { name: string; email: string; clientName: string; clientId: string; adminId: string },
-    reason: string,
-    openNewTab: boolean = true
-  ) => {
-    const sessionId = 'bpl-' + Date.now();
-    const sessionObj: ImpersonatedSession = {
-      adminName: targetAdmin.name,
-      adminEmail: targetAdmin.email,
-      clientName: targetAdmin.clientName,
-      clientId: targetAdmin.clientId,
-      reason,
-      bypassLogId: sessionId,
-      startTime: new Date().toLocaleString()
-    };
-
-    if (openNewTab) {
-      const params = new URLSearchParams({
-        bypassSessionId: sessionId,
-        adminName: targetAdmin.name,
-        adminEmail: targetAdmin.email,
-        clientName: targetAdmin.clientName,
-        clientId: targetAdmin.clientId,
-        reason
-      });
-      const newTabUrl = `${window.location.origin}/?${params.toString()}`;
-      window.open(newTabUrl, '_blank');
-      return;
-    }
-
-    sessionStorage.setItem(IMPERSONATE_KEY, JSON.stringify(sessionObj));
-    setImpersonatedSession(sessionObj);
-    saveUser({
-      name: targetAdmin.name,
-      email: targetAdmin.email,
-      role: `Client Admin (${targetAdmin.clientName})`,
-      roleCode: 'ORG_ADMIN',
-      avatarUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'
-    });
-  };
-
-  const exitBypassSession = () => {
-    setImpersonatedSession(null);
-    sessionStorage.removeItem(IMPERSONATE_KEY);
-    saveUser({
-      name: 'Alex Morgan',
-      email: 'superadmin@watchtower.dev',
-      role: 'Super Administrator',
-      roleCode: 'SUPER_ADMIN',
-      avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
-    });
-  };
-
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        isAuthenticated: !!user,
-        isImpersonating: !!impersonatedSession,
-        impersonatedSession,
-        login,
-        logout,
-        startBypassSession,
-        exitBypassSession
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const [user, setUser] = useState<SessionUser | null>(null);
+  // With no token there is nothing to restore, so the app can render the login
+  // screen immediately rather than flashing a loading state first.
+  const [status, setStatus] = useState<'loading' | 'authenticated' | 'anonymous'>(() =>
+    tokenStore.getAccess() ? 'loading' : 'anonymous',
   );
+
+  const signOutLocally = useCallback(() => {
+    tokenStore.clear();
+    setUser(null);
+    setStatus('anonymous');
+  }, []);
+
+  // The API client calls this when a refresh fails and the session is gone.
+  useEffect(() => {
+    setSessionExpiredHandler(signOutLocally);
+  }, [signOutLocally]);
+
+  /**
+   * Re-reads the account from the server. Every state update happens after the
+   * request settles, so this is a subscription to an external system rather
+   * than a synchronous cascade — which is exactly what an effect is for.
+   */
+  const refreshUser = useCallback(async () => {
+    try {
+      const me = await authApi.me();
+      setUser(me);
+      setStatus('authenticated');
+    } catch (error) {
+      if (error instanceof ApiError && error.isAuthError) {
+        signOutLocally();
+        return;
+      }
+      // A transient network problem should not throw the user out; keep the
+      // session and let the individual screens surface their own error state.
+      setStatus(tokenStore.getAccess() ? 'authenticated' : 'anonymous');
+    }
+  }, [signOutLocally]);
+
+  useEffect(() => {
+    if (!tokenStore.getAccess()) return;
+    // Restoring a session is a genuine external-system read: the stored token is
+    // exchanged with the server and the result becomes state. Every update here
+    // happens after that request settles, so there is no synchronous cascade —
+    // the lint rule cannot see through the async boundary to tell.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshUser();
+  }, [refreshUser]);
+
+  const login = useCallback(async (email: string, password: string) => {
+    const session = await authApi.login(email, password);
+    tokenStore.set(session.accessToken, session.refreshToken);
+    setUser(session.user);
+    setStatus('authenticated');
+    return session.user;
+  }, []);
+
+  const logout = useCallback(async () => {
+    try {
+      await authApi.logout();
+    } catch {
+      // Signing out locally must succeed even if the server call does not.
+    }
+    signOutLocally();
+  }, [signOutLocally]);
+
+  const value = useMemo<AuthContextValue>(() => {
+    const modules = new Set(user?.modules ?? []);
+    const permissions = new Set(user?.permissions ?? []);
+
+    return {
+      user,
+      status,
+      isAuthenticated: status === 'authenticated' && user !== null,
+      isSuperAdmin: user?.actorType === 'SUPER_ADMIN',
+      login,
+      logout,
+      refreshUser,
+      hasModule: (moduleCode: string) => modules.has(moduleCode),
+      can: (permissionCode: string) => permissions.has(permissionCode),
+      canAny: (permissionCodes: string[]) => permissionCodes.some((code) => permissions.has(code)),
+    };
+  }, [user, status, login, logout, refreshUser]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = () => {
+export const useAuth = (): AuthContextValue => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

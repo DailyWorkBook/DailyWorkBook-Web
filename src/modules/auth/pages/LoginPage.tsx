@@ -1,223 +1,175 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldCheck, Lock, Mail, ArrowRight, Eye, EyeOff, CheckCircle2, Sparkles, Building2, Crown } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, Lock, Mail, ShieldCheck } from 'lucide-react';
+import { Button } from '../../../components/ui/Button';
 import { useAuth } from '../../../core/auth';
-
-const FEATURES = [
-  'Automated geofence check-in classification',
-  'Live shift conflict detection & roster guard',
-  'Dual-control exception approval workflow',
-  'Audit log with immutable compliance trail',
-  'Role-based access control (RBAC) engine'
-];
+import { ApiError } from '../../../services';
+import { firstAccessibleWorkspacePath } from '../../../core/navigation';
+import { LoadingState } from '../../../components/feedback/States';
 
 export const LoginPage: React.FC = () => {
   const navigate = useNavigate();
-  const { login, isAuthenticated } = useAuth();
+  const location = useLocation();
+  const { login, status, isAuthenticated, isSuperAdmin, user } = useAuth();
 
-  const [email, setEmail] = useState('superadmin@watchtower.dev');
-  const [password, setPassword] = useState('WatchTower@2026');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [featIdx, setFeatIdx] = useState(0);
+  const [isSubmitting, setSubmitting] = useState(false);
 
-  // Auto-redirect if already logged in
-  useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
-  }, [isAuthenticated]);
+  if (status === 'loading') return <LoadingState label="Checking your session…" className="min-h-screen" />;
 
-  // Cycle features
-  useEffect(() => {
-    const t = setInterval(() => setFeatIdx((i) => (i + 1) % FEATURES.length), 2800);
-    return () => clearInterval(t);
-  }, []);
+  if (isAuthenticated && user) {
+    const destination = isSuperAdmin
+      ? '/platform'
+      : firstAccessibleWorkspacePath(user.modules, user.permissions);
+    return <Navigate to={destination} replace />;
+  }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
+    setSubmitting(true);
+
     try {
-      const success = await login(email, password);
-      setIsLoading(false);
-      if (success) {
-        if (email.toLowerCase().includes('superadmin')) navigate('/superadmin/dashboard');
-        else navigate('/');
-      } else {
-        setError('Invalid credentials. Check email and password.');
-      }
-    } catch (err: any) {
-      setIsLoading(false);
-      setError(err.message || 'Login failed. Please check your credentials.');
+      const signedIn = await login(email, password);
+      const from = (location.state as { from?: string } | null)?.from;
+      const destination =
+        signedIn.actorType === 'SUPER_ADMIN'
+          ? '/platform'
+          : from && from !== '/login'
+            ? from
+            : firstAccessibleWorkspacePath(signedIn.modules, signedIn.permissions);
+      navigate(destination, { replace: true });
+    } catch (caught) {
+      // The server deliberately gives one answer for a wrong password and an
+      // unknown address; the form repeats it rather than guessing further.
+      setError(caught instanceof ApiError ? caught.message : 'Sign-in failed. Please try again.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen w-full bg-bg-app flex flex-col md:flex-row selection:bg-brand-primary/20">
-      {/* ── LEFT: Dark Brand Hero ── */}
-      <div
-        className="md:w-[52%] relative flex flex-col justify-between p-8 lg:p-14 overflow-hidden"
-        style={{ background: 'linear-gradient(145deg, #0B1120 0%, #0E1B34 50%, #0F2050 100%)' }}
-      >
-        {/* Decorative blobs */}
-        <div
-          className="absolute top-[-80px] right-[-80px] w-[480px] h-[480px] rounded-full opacity-30 pointer-events-none"
-          style={{ background: 'radial-gradient(circle, #2F6BFF 0%, transparent 70%)' }}
-        />
-        <div
-          className="absolute bottom-[-100px] left-[-60px] w-[400px] h-[400px] rounded-full opacity-20 pointer-events-none"
-          style={{ background: 'radial-gradient(circle, #00D4B2 0%, transparent 70%)' }}
-        />
-
-        {/* Top Logo Header */}
-        <div className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-primary to-blue-400 flex items-center justify-center shadow-lg shadow-brand-primary/30">
-              <ShieldCheck className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <span className="text-xl font-black text-white tracking-tight">WatchTower</span>
-              <span className="text-[10px] font-mono block text-blue-300/70 uppercase tracking-widest -mt-1">
-                Enterprise Attendance
-              </span>
-            </div>
-          </div>
-          <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-white/10 text-blue-200 border border-white/15 backdrop-blur-md">
-            v2.4 Production Database
-          </span>
+    <div className="min-h-screen grid lg:grid-cols-2 bg-bg-app">
+      <div className="hidden lg:flex flex-col justify-between p-12 bg-gradient-to-br from-brand-primary via-brand-primary-600 to-brand-teal text-white relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10" aria-hidden>
+          <div className="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-white blur-3xl" />
+          <div className="absolute bottom-0 -left-24 w-80 h-80 rounded-full bg-white blur-3xl" />
         </div>
 
-        {/* Middle Value Proposition */}
-        <div className="relative z-10 my-auto py-12 max-w-lg space-y-6">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/20 text-blue-300 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5 text-blue-400" /> Multi-Tenant Workforce Security Platform
+        <div className="relative flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20">
+            <ShieldCheck className="w-5 h-5" strokeWidth={2} aria-hidden />
           </div>
+          <span className="text-lg font-extrabold tracking-tight">WatchTower</span>
+        </div>
 
-          <h1 className="text-3xl lg:text-4xl font-extrabold text-white leading-tight tracking-tight">
-            Security Guard Tracking & Attendance Infrastructure
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          className="relative space-y-4 max-w-md"
+        >
+          <h1 className="text-4xl font-black leading-tight tracking-tight">
+            Workforce attendance, under control.
           </h1>
-
-          <p className="text-sm text-blue-100/70 leading-relaxed">
-            Enterprise multi-tenant platform with live geofence verification, shift conflict detection, and passwordless Super Admin tenant control.
+          <p className="text-white/75 leading-relaxed">
+            Sites, posts, shifts and rosters in one place — with every check-in reconciled against the deployment you
+            actually planned.
           </p>
+        </motion.div>
 
-          {/* Dynamic feature highlight pill */}
-          <div className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-md space-y-2">
-            <div className="text-[11px] font-mono text-blue-400 font-bold uppercase tracking-wider">
-              Platform Feature &bull; {featIdx + 1}/{FEATURES.length}
-            </div>
-            <motion.div
-              key={featIdx}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="flex items-center gap-2.5 text-sm text-white font-medium"
-            >
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              <span>{FEATURES[featIdx]}</span>
-            </motion.div>
-          </div>
-        </div>
-
-        {/* Footer info */}
-        <div className="relative z-10 text-xs text-blue-200/50 flex items-center justify-between border-t border-white/10 pt-4">
-          <span>&copy; {new Date().getFullYear()} WatchTower Security Systems. All rights reserved.</span>
-          <span className="font-mono">MariaDB / MySQL Engine</span>
-        </div>
+        <p className="relative text-xs text-white/50">© {new Date().getFullYear()} WatchTower Attendance</p>
       </div>
 
-      {/* ── RIGHT: Login Form Card ── */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-12 bg-bg-surface">
+      <div className="flex items-center justify-center p-6 sm:p-12">
         <motion.div
-          initial={{ opacity: 0, y: 15 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md space-y-6"
+          transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-sm space-y-6"
         >
-          <div className="space-y-1">
-            <h2 className="text-2xl font-black text-txt-primary tracking-tight">Sign In to Dashboard</h2>
-            <p className="text-xs text-txt-secondary">
-              Enter your registered organization administrator credentials to access your control panel.
-            </p>
+          <div className="lg:hidden flex items-center gap-2.5 justify-center">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-primary to-brand-teal flex items-center justify-center">
+              <ShieldCheck className="w-5 h-5 text-white" strokeWidth={2} aria-hidden />
+            </div>
+            <span className="text-base font-extrabold text-txt-primary">WatchTower</span>
+          </div>
+
+          <div className="space-y-1.5">
+            <h2 className="text-2xl font-black text-txt-primary tracking-tight">Sign in</h2>
+            <p className="text-xs text-txt-secondary">Use the credentials issued for your account.</p>
           </div>
 
           {error && (
-            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-600 text-xs font-bold rounded-xl flex items-center gap-2">
-              <Lock className="w-4 h-4 flex-shrink-0" />
+            <div
+              role="alert"
+              className="p-3 rounded-xl bg-status-absent/10 border border-status-absent/25 text-status-absent text-xs font-semibold flex items-start gap-2"
+            >
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-px" aria-hidden />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={submit} className="space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-txt-primary mb-1.5">Email Address</label>
+              <label htmlFor="email" className="block text-xs font-bold text-txt-secondary mb-1.5">
+                Email address
+              </label>
               <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-txt-tertiary" />
+                <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary" aria-hidden />
                 <input
+                  id="email"
                   type="email"
                   required
+                  autoComplete="username"
+                  autoFocus
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@company.com"
-                  className="w-full pl-9 pr-4 py-2.5 bg-bg-surface border border-border rounded-btn text-sm text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary transition-all"
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="you@company.com"
+                  className="w-full pl-9 pr-3 py-2.5 min-h-[44px] bg-bg-surface border border-border rounded-xl text-sm text-txt-primary placeholder:text-txt-tertiary focus:outline-none focus:ring-2 focus:ring-brand-primary/40 focus:border-brand-primary transition-all"
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-txt-primary mb-1.5">Password</label>
+              <label htmlFor="password" className="block text-xs font-bold text-txt-secondary mb-1.5">
+                Password
+              </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-txt-tertiary" />
+                <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-tertiary" aria-hidden />
                 <input
+                  id="password"
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="current-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full pl-9 pr-10 py-2.5 bg-bg-surface border border-border rounded-btn text-sm text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary transition-all"
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Your password"
+                  className="w-full pl-9 pr-10 py-2.5 min-h-[44px] bg-bg-surface border border-border rounded-xl text-sm text-txt-primary placeholder:text-txt-tertiary focus:outline-none focus:ring-2 focus:ring-brand-primary/40 focus:border-brand-primary transition-all"
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPassword((p) => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-txt-tertiary hover:text-txt-primary transition-colors"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-txt-tertiary hover:text-txt-primary rounded"
                 >
-                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  {showPassword ? <EyeOff className="w-4 h-4" aria-hidden /> : <Eye className="w-4 h-4" aria-hidden />}
                 </button>
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full h-11 flex items-center justify-center gap-2 bg-brand-primary hover:bg-brand-primary-600 active:bg-brand-primary-700 text-white text-sm font-bold rounded-btn shadow-lg shadow-brand-primary/30 transition-all disabled:opacity-60"
-            >
-              {isLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
-                  Sign In to Console <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
+            <Button type="submit" size="lg" isLoading={isSubmitting} className="w-full">
+              Sign in
+            </Button>
           </form>
 
-          {/* Credentials Notice Box */}
-          <div className="p-4 bg-bg-surface-2 border border-border rounded-2xl space-y-2 text-xs">
-            <div className="font-bold text-txt-primary flex items-center gap-1.5">
-              <Crown className="w-4 h-4 text-amber-500" /> Platform Authentication Guide
-            </div>
-            <div className="text-[11px] text-txt-secondary space-y-1">
-              <div>
-                &bull; <strong className="text-txt-primary">Super Admin:</strong> Log in with <code className="bg-bg-surface px-1.5 py-0.5 rounded font-mono font-bold text-brand-primary">superadmin@watchtower.dev</code> to manage clients.
-              </div>
-              <div>
-                &bull; <strong className="text-txt-primary">Client Admin:</strong> Super Admin creates clients and registers their Admin Email. Use your registered email and password to log in directly.
-              </div>
-            </div>
-          </div>
-
-          <p className="mt-4 text-center text-[11px] text-txt-tertiary">
-            All activity on this console is recorded in the immutable audit log.
+          <p className="text-[11px] text-txt-tertiary leading-relaxed text-center">
+            Accounts are created by your administrator. If you cannot sign in, ask them to check your account or reset
+            your password.
           </p>
         </motion.div>
       </div>

@@ -1,264 +1,290 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Download, Plus, Filter, Building2, CheckCircle2, ShieldCheck, MapPin, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarCheck, RefreshCw } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Badge } from '../../../components/ui/Badge';
-import { attendanceApi } from '../../../services/attendanceApi';
-import { sitesApi } from '../../../services/sitesApi';
-import { employeesApi } from '../../../services/employeesApi';
+import { PageHeader, Pagination, SearchInput, SortableHeader } from '../../../components/data';
+import { EmptyState, ErrorState, TableSkeleton } from '../../../components/feedback/States';
+import { useAuth } from '../../../core/auth';
+import { queryKeys } from '../../../core/query';
+import { attendanceApi, sitesApi } from '../../../services';
+import { describeApiError } from '../../../hooks/useApiErrorMessage';
+import { useDebounced, useToast } from '../../../hooks';
+
+const STATES = [
+  'PRESENT', 'LATE_IN', 'LATE_IN_HALF_DAY', 'ABSENT', 'ON_LEAVE',
+  'HALF_DAY_LEAVE', 'HOLIDAY', 'EARLY_EXIT', 'EXCEPTION_PENDING', 'COMP_OFF',
+];
+
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const formatTime = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—';
+
+const formatDuration = (minutes: number) =>
+  minutes > 0 ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m` : '—';
 
 export const AttendanceRegisterPage: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSiteId, setSelectedSiteId] = useState('');
-  const [records, setRecords] = useState<any[]>([]);
-  const [sites, setSites] = useState<any[]>([]);
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const { can } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
 
-  // Manual entry form
-  const [manualEmp, setManualEmp] = useState('');
-  const [manualSite, setManualSite] = useState('');
-  const [manualPost, setManualPost] = useState('');
-  const [manualNote, setManualNote] = useState('');
+  const [date, setDate] = useState(todayIso());
+  const [state, setState] = useState('');
+  const [siteId, setSiteId] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [sort, setSort] = useState('date');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
 
-  useEffect(() => {
-    async function loadRegister() {
-      try {
-        setLoading(true);
-        const [regData, sitesData, empData] = await Promise.all([
-          attendanceApi.getRegister({ siteId: selectedSiteId }),
-          sitesApi.getSites(),
-          employeesApi.getEmployees()
-        ]);
-        setRecords(regData || []);
-        setSites(sitesData || []);
-        setEmployees(empData || []);
-        if (empData?.length > 0) setManualEmp(empData[0].id);
-        if (sitesData?.length > 0) {
-          setManualSite(sitesData[0].id);
-          if (sitesData[0].posts?.length > 0) setManualPost(sitesData[0].posts[0].id);
-        }
-      } catch (err) {
-        console.error('Error fetching attendance register:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadRegister();
-  }, [selectedSiteId]);
-
-  const triggerToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
+  const debouncedSearch = useDebounced(search);
+  const params = {
+    page,
+    pageSize,
+    sort,
+    order,
+    date,
+    state: state || undefined,
+    siteId: siteId || undefined,
+    q: debouncedSearch || undefined,
   };
 
-  const handleManualSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await attendanceApi.manualPunch({
-        employeeId: manualEmp,
-        siteId: manualSite,
-        postId: manualPost,
-        note: manualNote || 'Manual Admin Punch'
-      });
-      triggerToast('Manual check-in recorded successfully!');
-      setIsManualModalOpen(false);
-      const regData = await attendanceApi.getRegister({ siteId: selectedSiteId });
-      setRecords(regData || []);
-    } catch (err) {
-      console.error('Manual punch error:', err);
+  const register = useQuery({
+    queryKey: queryKeys.register(params),
+    queryFn: () => attendanceApi.register(params),
+  });
+
+  const sites = useQuery({
+    queryKey: queryKeys.sites({ pageSize: 100, isActive: true }),
+    queryFn: () => sitesApi.list({ pageSize: 100, isActive: true }),
+    enabled: can('SITE_VIEW'),
+    staleTime: 60_000,
+  });
+
+  const recompute = useMutation({
+    mutationFn: () => attendanceApi.recompute(date),
+    onSuccess: (result) => {
+      toast.success('Register rebuilt', `${result.employees} employee-day${result.employees === 1 ? '' : 's'} recomputed.`);
+      void queryClient.invalidateQueries({ queryKey: ['attendance'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (error) => toast.error('Could not rebuild the register', describeApiError(error)),
+  });
+
+  const toggleSort = (field: string) => {
+    if (sort === field) setOrder((current) => (current === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSort(field);
+      setOrder('desc');
     }
+    setPage(1);
   };
 
-  const filtered = records.filter(
-    (r) =>
-      r.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      r.siteName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const summary = (register.data?.meta.summary ?? {}) as Record<string, number>;
+  const hasFilters = Boolean(state || siteId || debouncedSearch);
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Title Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold flex items-center gap-1">
-              <ShieldCheck className="w-4 h-4 text-brand-primary" /> DAILY ATTENDANCE REGISTER
-            </span>
-            <span className="text-xs text-txt-secondary">&bull; Real-time Guard Punches</span>
-          </div>
-          <h1 className="text-2xl font-black text-txt-primary tracking-tight mt-1">
-            Attendance Register Log
-          </h1>
-        </div>
+      <PageHeader
+        eyebrow="Attendance"
+        eyebrowIcon={<CalendarCheck className="w-3.5 h-3.5" aria-hidden />}
+        title="Daily register"
+        description="One resolved row per person per day, built from their check-ins, roster and approved leave."
+        actions={
+          can('ATTENDANCE_MANUAL_ENTRY') ? (
+            <Button
+              variant="outline"
+              onClick={() => recompute.mutate()}
+              isLoading={recompute.isPending}
+              leftIcon={<RefreshCw className="w-3.5 h-3.5" aria-hidden />}
+            >
+              Rebuild this day
+            </Button>
+          ) : undefined
+        }
+      />
 
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => setIsManualModalOpen(true)}
-            className="bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-          >
-            <Plus className="w-4 h-4" /> Manual Check-in
-          </Button>
-        </div>
-      </div>
-
-      {toastMsg && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 rounded-xl text-xs font-bold">
-          {toastMsg}
-        </div>
-      )}
-
-      {/* Filters Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-bg-surface p-3 border border-border rounded-2xl shadow-sm">
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-secondary" />
+      <div className="flex flex-col lg:flex-row gap-3">
+        <label className="flex items-center gap-2 text-xs font-bold text-txt-secondary">
+          Date
           <input
-            type="text"
-            placeholder="Search guard name, code, or site..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
+            type="date"
+            value={date}
+            onChange={(event) => {
+              setDate(event.target.value);
+              setPage(1);
+            }}
+            className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
           />
-        </div>
+        </label>
 
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-txt-secondary" />
+        <SearchInput
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          placeholder="Search by employee name or code…"
+          className="flex-1 max-w-sm"
+          label="Search the register"
+        />
+
+        <div className="flex flex-wrap gap-2">
           <select
-            value={selectedSiteId}
-            onChange={(e) => setSelectedSiteId(e.target.value)}
-            className="bg-bg-surface-2 border border-border text-xs rounded-xl px-3 py-2 text-txt-primary font-medium focus:outline-none"
+            value={state}
+            onChange={(event) => {
+              setState(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by attendance state"
+            className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
           >
-            <option value="">All Sites</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            <option value="">All states</option>
+            {STATES.map((value) => (
+              <option key={value} value={value}>
+                {value.replace(/_/g, ' ')}
               </option>
             ))}
           </select>
+
+          {can('SITE_VIEW') && (
+            <select
+              value={siteId}
+              onChange={(event) => {
+                setSiteId(event.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by site"
+              className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+            >
+              <option value="">All sites</option>
+              {(sites.data?.data ?? []).map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
-      {loading && (
-        <div className="flex items-center justify-center p-8 gap-2 text-txt-secondary text-xs">
-          <Loader2 className="w-5 h-5 animate-spin text-brand-primary" /> Loading attendance records from database...
+      {Object.keys(summary).length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {Object.entries(summary).map(([key, count]) => (
+            <span key={key} className="px-3 py-1.5 rounded-xl bg-bg-surface border border-border text-[11px]">
+              <span className="text-txt-secondary">{key.replace(/_/g, ' ')}</span>{' '}
+              <span className="font-bold text-txt-primary tabular-nums">{count}</span>
+            </span>
+          ))}
         </div>
       )}
 
-      {!loading && (
-        <div className="bg-bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-bg-surface-2 border-b border-border/80 text-txt-secondary font-mono uppercase text-[10px]">
-                <tr>
-                  <th className="px-4 py-3">Guard Name</th>
-                  <th className="px-4 py-3">Site / Post</th>
-                  <th className="px-4 py-3">Shift Window</th>
-                  <th className="px-4 py-3">Check In</th>
-                  <th className="px-4 py-3">Check Out</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Method</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-bg-surface-2/40 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={r.employeePhoto}
-                          alt={r.employeeName}
-                          className="w-7 h-7 rounded-full object-cover ring-1 ring-border"
-                        />
-                        <div>
-                          <div className="font-bold text-txt-primary">{r.employeeName}</div>
-                          <div className="text-[10px] text-txt-secondary font-mono">{r.employeeCode}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-bold text-txt-primary">{r.siteName}</div>
-                      <div className="text-[11px] text-txt-secondary">{r.postName}</div>
-                    </td>
-                    <td className="px-4 py-3 text-txt-secondary font-medium">{r.shiftName}</td>
-                    <td className="px-4 py-3 font-mono font-bold text-emerald-600">{r.firstCheckInAt}</td>
-                    <td className="px-4 py-3 font-mono text-txt-secondary">{r.lastCheckOutAt}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">
-                        {r.state}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-[10px] text-txt-secondary">
-                      {r.method} &bull; GPS Valid
-                    </td>
+      <div className="bg-bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
+        {register.isLoading ? (
+          <TableSkeleton rows={6} columns={6} />
+        ) : register.isError ? (
+          <ErrorState message={describeApiError(register.error)} onRetry={() => void register.refetch()} />
+        ) : register.data!.data.length === 0 ? (
+          <EmptyState
+            icon={CalendarCheck}
+            title={hasFilters ? 'No records match these filters' : 'Nothing recorded for this date'}
+            description={
+              hasFilters
+                ? 'Try a different state, site or search term.'
+                : 'A row appears once someone is rostered for the day, checks in, or has approved leave covering it.'
+            }
+            action={
+              hasFilters
+                ? {
+                    label: 'Clear filters',
+                    onClick: () => {
+                      setState('');
+                      setSiteId('');
+                      setSearch('');
+                      setPage(1);
+                    },
+                  }
+                : undefined
+            }
+            className="border-0"
+          />
+        ) : (
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-bg-surface-2 border-b border-border/70 text-txt-secondary">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Employee</th>
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Deployment</th>
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Check in</th>
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Check out</th>
+                    <SortableHeader field="workedMinutes" label="Worked" currentSort={sort} currentOrder={order} onSort={toggleSort} />
+                    <SortableHeader field="state" label="State" currentSort={sort} currentOrder={order} onSort={toggleSort} />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Manual Check-in Modal */}
-      {isManualModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-txt-primary">Manual Guard Check-in</h3>
-            <form onSubmit={handleManualSubmit} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Select Guard</label>
-                <select
-                  value={manualEmp}
-                  onChange={(e) => setManualEmp(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                >
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>
-                      {e.name} ({e.employeeCode})
-                    </option>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {register.data!.data.map((row) => (
+                    <tr key={row.id} className="hover:bg-bg-surface-2/50 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-txt-primary">{row.employee.name}</div>
+                        <div className="text-[10px] font-mono text-txt-secondary">{row.employee.employeeCode}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-txt-primary">{row.site?.name ?? '—'}</div>
+                        <div className="text-[10px] text-txt-secondary">{row.post?.name ?? '—'}</div>
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {formatTime(row.firstCheckInAt)}
+                        {row.isLate && <span className="ml-1 text-[10px] text-status-late">+{row.lateByMinutes}m</span>}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {formatTime(row.lastCheckOutAt)}
+                        {row.isEarlyExit && <span className="ml-1 text-[10px] text-status-late">early</span>}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">{formatDuration(row.workedMinutes)}</td>
+                      <td className="px-4 py-3">
+                        <Badge status={row.state} />
+                      </td>
+                    </tr>
                   ))}
-                </select>
-              </div>
+                </tbody>
+              </table>
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Select Site</label>
-                <select
-                  value={manualSite}
-                  onChange={(e) => setManualSite(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                >
-                  {sites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <div className="md:hidden divide-y divide-border/60">
+              {register.data!.data.map((row) => (
+                <div key={row.id} className="p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-txt-primary truncate">{row.employee.name}</div>
+                      <div className="text-[11px] font-mono text-txt-secondary">{row.employee.employeeCode}</div>
+                    </div>
+                    <Badge status={row.state} />
+                  </div>
+                  <div className="text-xs text-txt-secondary space-y-0.5">
+                    <div>{row.site?.name ?? '—'} · {row.post?.name ?? '—'}</div>
+                    <div className="tabular-nums">
+                      In {formatTime(row.firstCheckInAt)} · Out {formatTime(row.lastCheckOutAt)} ·{' '}
+                      {formatDuration(row.workedMinutes)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Note / Reason</label>
-                <input
-                  type="text"
-                  placeholder="Supervisor Manual Check-in"
-                  value={manualNote}
-                  onChange={(e) => setManualNote(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="outline" onClick={() => setIsManualModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-brand-primary text-white">
-                  Confirm Manual Check-in
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            <Pagination
+              meta={register.data!.meta}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              label="records"
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 };

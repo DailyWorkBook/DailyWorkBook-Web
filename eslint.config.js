@@ -19,4 +19,13 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    // Context modules deliberately export a provider component next to the hook
+    // that reads it — splitting them across files to satisfy fast refresh would
+    // make the pairing harder to follow for no runtime benefit.
+    files: ['src/core/auth/index.tsx', 'src/core/theme/index.tsx', 'src/hooks/useToast.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])

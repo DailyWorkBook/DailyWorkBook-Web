@@ -1,251 +1,365 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Users, ShieldCheck, Phone, Mail, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, KeyRound, Mail, Phone, Plus, Users } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
-import { employeesApi } from '../../../services/employeesApi';
-import { sitesApi } from '../../../services/sitesApi';
+import { Badge } from '../../../components/ui/Badge';
+import { PageHeader, Pagination, SearchInput, SortableHeader } from '../../../components/data';
+import { EmptyState, ErrorState, TableSkeleton } from '../../../components/feedback/States';
+import { useAuth } from '../../../core/auth';
+import { queryKeys } from '../../../core/query';
+import { employeesApi, rolesApi, sitesApi } from '../../../services';
+import { describeApiError } from '../../../hooks/useApiErrorMessage';
+import { useDebounced, useToast } from '../../../hooks';
+import { EmployeeFormDialog } from '../components/EmployeeFormDialog';
+
+const STATUSES = ['ONBOARDING', 'ACTIVE', 'ON_LEAVE', 'SUSPENDED', 'INACTIVE', 'TERMINATED'];
 
 export const EmployeeListPage: React.FC = () => {
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [sites, setSites] = useState<any[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const queryClient = useQueryClient();
 
-  // New Employee Form
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('SECURITY_GUARD');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [roleId, setRoleId] = useState('');
   const [siteId, setSiteId] = useState('');
+  const [sort, setSort] = useState('createdAt');
+  const [order, setOrder] = useState<'asc' | 'desc'>('desc');
+  const [isFormOpen, setFormOpen] = useState(false);
 
-  useEffect(() => {
-    async function loadEmployees() {
-      try {
-        setLoading(true);
-        const [empData, sitesData] = await Promise.all([
-          employeesApi.getEmployees(),
-          sitesApi.getSites()
-        ]);
-        setEmployees(empData || []);
-        setSites(sitesData || []);
-        if (sitesData?.length > 0) setSiteId(sitesData[0].id);
-      } catch (err) {
-        console.error('Error fetching employees:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadEmployees();
-  }, []);
-
-  const handleCreateEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const newEmp = await employeesApi.createEmployee({
-        firstName,
-        lastName,
-        phone,
-        email,
-        role,
-        currentSiteId: siteId,
-        dateOfJoining: new Date().toISOString().split('T')[0]
-      });
-      setEmployees((prev) => [newEmp, ...prev]);
-      setIsAddModalOpen(false);
-      setFirstName('');
-      setLastName('');
-      setPhone('');
-      setEmail('');
-    } catch (err) {
-      console.error('Error creating employee:', err);
-    }
+  const debouncedSearch = useDebounced(search);
+  const params = {
+    page,
+    pageSize,
+    sort,
+    order,
+    q: debouncedSearch || undefined,
+    status: status || undefined,
+    roleId: roleId || undefined,
+    siteId: siteId || undefined,
   };
 
-  const filtered = employees.filter(
-    (e) =>
-      e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.employeeCode.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      e.currentSiteName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const employees = useQuery({
+    queryKey: queryKeys.employees(params),
+    queryFn: () => employeesApi.list(params),
+  });
+
+  const roles = useQuery({
+    queryKey: queryKeys.roles({ pageSize: 100, isActive: true }),
+    queryFn: () => rolesApi.list({ pageSize: 100, isActive: true }),
+    staleTime: 60_000,
+  });
+
+  const sites = useQuery({
+    queryKey: queryKeys.sites({ pageSize: 100 }),
+    queryFn: () => sitesApi.list({ pageSize: 100, isActive: true }),
+    enabled: can('SITE_VIEW'),
+    staleTime: 60_000,
+  });
+
+  /**
+   * The server is the authority on whether onboarding is possible. It reports
+   * `rolesConfigured` alongside the list, so the button state and the warning
+   * both come from the same answer rather than a second guess on the client.
+   */
+  const rolesConfigured = (employees.data?.meta.rolesConfigured as boolean | undefined) ?? true;
+
+  const toggleSort = (field: string) => {
+    if (sort === field) {
+      setOrder((current) => (current === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSort(field);
+      setOrder('asc');
+    }
+    setPage(1);
+  };
+
+  const hasFilters = Boolean(debouncedSearch || status || roleId || siteId);
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Title Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold flex items-center gap-1">
-              <Users className="w-4 h-4 text-brand-primary" /> WORKFORCE & GUARD DIRECTORY
-            </span>
+      <PageHeader
+        eyebrow="Workforce"
+        eyebrowIcon={<Users className="w-3.5 h-3.5" aria-hidden />}
+        title="Employees"
+        description="Everyone on the books, with the role they hold and where they are deployed."
+        actions={
+          can('EMPLOYEE_CREATE') ? (
+            <Button
+              onClick={() => setFormOpen(true)}
+              disabled={!rolesConfigured}
+              title={rolesConfigured ? undefined : 'Configure at least one role first'}
+              leftIcon={<Plus className="w-4 h-4" aria-hidden />}
+            >
+              Add employee
+            </Button>
+          ) : undefined
+        }
+      />
+
+      {/* The role gate, stated plainly rather than as a disabled button with no
+          explanation. The backend refuses the same request independently. */}
+      {!rolesConfigured && !employees.isLoading && (
+        <div className="p-4 bg-status-late/10 border border-status-late/30 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-status-late flex-shrink-0 mt-0.5" strokeWidth={1.75} aria-hidden />
+            <div>
+              <h2 className="font-extrabold text-sm text-txt-primary">Roles must be configured first</h2>
+              <p className="text-xs text-txt-secondary mt-0.5 leading-relaxed max-w-xl">
+                Every employee holds a role, so at least one role has to exist before anyone can be onboarded. This is
+                enforced by the server as well — creating an employee now would be rejected.
+              </p>
+            </div>
           </div>
-          <h1 className="text-2xl font-black text-txt-primary tracking-tight mt-1">
-            Employees Directory ({employees.length})
-          </h1>
+          {can('ROLE_CREATE') && (
+            <Link
+              to="/roles"
+              className="px-4 py-2 bg-status-late text-white text-xs font-bold rounded-xl shadow-sm flex items-center gap-1.5 flex-shrink-0 hover:opacity-90 transition-opacity min-h-[38px]"
+            >
+              <KeyRound className="w-4 h-4" aria-hidden /> Configure roles
+            </Link>
+          )}
         </div>
+      )}
 
-        <Button
-          onClick={() => setIsAddModalOpen(true)}
-          className="bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add New Security Guard
-        </Button>
-      </div>
-
-      {/* Search Bar */}
-      <div className="relative max-w-md">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-secondary" />
-        <input
-          type="text"
-          placeholder="Search employee name, code, or site..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-9 pr-4 py-2 bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
+      <div className="flex flex-col lg:flex-row gap-3">
+        <SearchInput
+          value={search}
+          onChange={(value) => {
+            setSearch(value);
+            setPage(1);
+          }}
+          placeholder="Search by name, code, phone or designation…"
+          className="flex-1 max-w-md"
+          label="Search employees"
         />
+
+        <div className="flex flex-wrap gap-2">
+          <select
+            value={status}
+            onChange={(event) => {
+              setStatus(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by status"
+            className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+          >
+            <option value="">All statuses</option>
+            {STATUSES.map((value) => (
+              <option key={value} value={value}>
+                {value.replace(/_/g, ' ')}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={roleId}
+            onChange={(event) => {
+              setRoleId(event.target.value);
+              setPage(1);
+            }}
+            aria-label="Filter by role"
+            className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+          >
+            <option value="">All roles</option>
+            {(roles.data?.data ?? []).map((role) => (
+              <option key={role.id} value={role.id}>
+                {role.name}
+              </option>
+            ))}
+          </select>
+
+          {can('SITE_VIEW') && (
+            <select
+              value={siteId}
+              onChange={(event) => {
+                setSiteId(event.target.value);
+                setPage(1);
+              }}
+              aria-label="Filter by site"
+              className="px-3 py-2 min-h-[38px] bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+            >
+              <option value="">All sites</option>
+              {(sites.data?.data ?? []).map((site) => (
+                <option key={site.id} value={site.id}>
+                  {site.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
-      {loading && (
-        <div className="flex items-center justify-center p-8 gap-2 text-txt-secondary text-xs">
-          <Loader2 className="w-5 h-5 animate-spin text-brand-primary" /> Syncing employee directory from database...
-        </div>
-      )}
-
-      {!loading && (
-        <div className="bg-bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-bg-surface-2 border-b border-border/80 text-txt-secondary font-mono uppercase text-[10px]">
-                <tr>
-                  <th className="px-4 py-3">Employee Name</th>
-                  <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Assigned Site & Post</th>
-                  <th className="px-4 py-3">Contact Information</th>
-                  <th className="px-4 py-3">Date of Joining</th>
-                  <th className="px-4 py-3 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {filtered.map((emp) => (
-                  <tr key={emp.id} className="hover:bg-bg-surface-2/40 transition-colors">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={emp.photoUrl || `https://i.pravatar.cc/150?u=${emp.id}`}
-                          alt={emp.name}
-                          className="w-8 h-8 rounded-full object-cover ring-1 ring-border"
-                        />
-                        <div>
-                          <div className="font-bold text-txt-primary">{emp.name}</div>
-                          <div className="text-[10px] text-txt-secondary font-mono">{emp.employeeCode}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-semibold text-txt-primary">{emp.role}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-bold text-txt-primary">{emp.currentSiteName}</div>
-                      <div className="text-[10px] text-txt-secondary">{emp.currentPostName}</div>
-                    </td>
-                    <td className="px-4 py-3 text-txt-secondary">
-                      <div className="flex items-center gap-1">
-                        <Phone className="w-3 h-3 text-txt-secondary" />
-                        <span>{emp.phone}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-txt-secondary">{emp.dateOfJoining}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">
-                        {emp.status}
-                      </span>
-                    </td>
+      <div className="bg-bg-surface border border-border rounded-2xl shadow-sm overflow-hidden">
+        {employees.isLoading ? (
+          <TableSkeleton rows={6} columns={6} />
+        ) : employees.isError ? (
+          <ErrorState message={describeApiError(employees.error)} onRetry={() => void employees.refetch()} />
+        ) : employees.data!.data.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title={hasFilters ? 'No employees match these filters' : 'No employees yet'}
+            description={
+              hasFilters
+                ? 'Try clearing a filter or searching for something else.'
+                : rolesConfigured
+                  ? 'Onboard your first employee to start building the roster.'
+                  : 'Configure a role first — every employee must hold one.'
+            }
+            action={
+              hasFilters
+                ? {
+                    label: 'Clear filters',
+                    onClick: () => {
+                      setSearch('');
+                      setStatus('');
+                      setRoleId('');
+                      setSiteId('');
+                      setPage(1);
+                    },
+                  }
+                : rolesConfigured && can('EMPLOYEE_CREATE')
+                  ? { label: 'Add employee', onClick: () => setFormOpen(true), icon: <Plus className="w-3.5 h-3.5" /> }
+                  : undefined
+            }
+            className="border-0"
+          />
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-bg-surface-2 border-b border-border/70 text-txt-secondary">
+                  <tr>
+                    <SortableHeader field="employeeCode" label="Code" currentSort={sort} currentOrder={order} onSort={toggleSort} />
+                    <SortableHeader field="firstName" label="Name" currentSort={sort} currentOrder={order} onSort={toggleSort} />
+                    <SortableHeader field="designation" label="Designation" currentSort={sort} currentOrder={order} onSort={toggleSort} />
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Role</th>
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide">Deployment</th>
+                    <SortableHeader field="status" label="Status" currentSort={sort} currentOrder={order} onSort={toggleSort} />
+                    <th scope="col" className="px-4 py-3 font-mono uppercase text-[10px] tracking-wide text-right">Records</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Add Employee Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-txt-primary">Onboard Security Employee</h3>
-            <form onSubmit={handleCreateEmployee} className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs font-bold text-txt-secondary">First Name</label>
-                  <input
-                    type="text"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-txt-secondary">Last Name</label>
-                  <input
-                    type="text"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Phone Number</label>
-                <input
-                  type="text"
-                  placeholder="+91 98000 00000"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Role / Position</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                >
-                  <option value="SECURITY_GUARD">Security Guard</option>
-                  <option value="SECURITY_OFFICER">Security Officer</option>
-                  <option value="RELIEVER">Reliever Guard</option>
-                  <option value="TEMPORARY">Temporary Guard</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Assigned Site</label>
-                <select
-                  value={siteId}
-                  onChange={(e) => setSiteId(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                >
-                  {sites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.clientName})
-                    </option>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {employees.data!.data.map((employee) => (
+                    <tr
+                      key={employee.id}
+                      onClick={() => navigate(`/employees/${employee.id}`)}
+                      className="hover:bg-bg-surface-2/50 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3 font-mono font-bold text-brand-primary">{employee.employeeCode}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-bold text-txt-primary">{employee.fullName}</div>
+                        <div className="text-[10px] text-txt-secondary">{employee.phone}</div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-txt-primary">{employee.designation}</div>
+                        <div className="text-[10px] text-txt-secondary">{employee.department}</div>
+                      </td>
+                      <td className="px-4 py-3 text-txt-secondary">{employee.role.name}</td>
+                      <td className="px-4 py-3">
+                        {employee.currentSite ? (
+                          <>
+                            <div className="text-txt-primary">{employee.currentSite.name}</div>
+                            <div className="text-[10px] text-txt-secondary">{employee.currentPost?.name ?? 'No post assigned'}</div>
+                          </>
+                        ) : (
+                          <span className="text-txt-tertiary">Not deployed</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge status={employee.status} />
+                      </td>
+                      <td className="px-4 py-3 text-right space-x-1">
+                        {employee.kycStatus && (
+                          <span
+                            title={`KYC ${employee.kycStatus.toLowerCase()}`}
+                            className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              employee.kycStatus === 'VERIFIED'
+                                ? 'bg-brand-teal/10 text-brand-teal'
+                                : 'bg-status-pending/10 text-txt-secondary'
+                            }`}
+                          >
+                            KYC
+                          </span>
+                        )}
+                        {employee.hasBankAccount && (
+                          <span
+                            title={employee.bankVerified ? 'Bank account verified' : 'Bank account on file, not verified'}
+                            className={`inline-block px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                              employee.bankVerified ? 'bg-brand-teal/10 text-brand-teal' : 'bg-status-pending/10 text-txt-secondary'
+                            }`}
+                          >
+                            BANK
+                          </span>
+                        )}
+                      </td>
+                    </tr>
                   ))}
-                </select>
-              </div>
+                </tbody>
+              </table>
+            </div>
 
-              <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-brand-primary text-white">
-                  Save Employee
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+            {/* Mobile cards — a nine-column table is unusable on a phone. */}
+            <div className="md:hidden divide-y divide-border/60">
+              {employees.data!.data.map((employee) => (
+                <button
+                  key={employee.id}
+                  onClick={() => navigate(`/employees/${employee.id}`)}
+                  className="w-full text-left p-4 space-y-2 hover:bg-bg-surface-2/50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm text-txt-primary truncate">{employee.fullName}</div>
+                      <div className="text-[11px] font-mono text-brand-primary">{employee.employeeCode}</div>
+                    </div>
+                    <Badge status={employee.status} />
+                  </div>
+                  <div className="text-xs text-txt-secondary space-y-0.5">
+                    <div>{employee.designation} · {employee.role.name}</div>
+                    <div className="flex items-center gap-1.5">
+                      <Phone className="w-3 h-3" aria-hidden /> {employee.phone}
+                    </div>
+                    {employee.email && (
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Mail className="w-3 h-3 flex-shrink-0" aria-hidden /> {employee.email}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <Pagination
+              meta={employees.data!.meta}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              label="employees"
+            />
+          </>
+        )}
+      </div>
+
+      {isFormOpen && (
+        <EmployeeFormDialog
+          roles={roles.data?.data ?? []}
+          sites={sites.data?.data ?? []}
+          onClose={() => setFormOpen(false)}
+          onSaved={(employee) => {
+            setFormOpen(false);
+            toast.success('Employee onboarded', `${employee.fullName} was added as ${employee.employeeCode}.`);
+            void queryClient.invalidateQueries({ queryKey: ['employees'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+            navigate(`/employees/${employee.id}`);
+          }}
+        />
       )}
     </div>
   );

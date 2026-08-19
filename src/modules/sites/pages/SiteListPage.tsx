@@ -1,204 +1,159 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Building2, MapPin, ShieldCheck, Loader2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Building2, MapPin, Plus, ShieldCheck } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
-import { sitesApi } from '../../../services/sitesApi';
+import { PageHeader, Pagination, SearchInput } from '../../../components/data';
+import { EmptyState, ErrorState, TableSkeleton } from '../../../components/feedback/States';
+import { useAuth } from '../../../core/auth';
+import { queryKeys } from '../../../core/query';
+import { sitesApi, type Site } from '../../../services';
+import { describeApiError } from '../../../hooks/useApiErrorMessage';
+import { useDebounced, useToast } from '../../../hooks';
+import { SiteFormDialog } from '../components/SiteFormDialog';
 
 export const SiteListPage: React.FC = () => {
-  const [sites, setSites] = useState<any[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const navigate = useNavigate();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { can } = useAuth();
 
-  // New Site Form
-  const [clientName, setClientName] = useState('HDFC Bank');
-  const [siteName, setSiteName] = useState('');
-  const [addressLine, setAddressLine] = useState('');
-  const [city, setCity] = useState('Mumbai');
-  const [geofenceRadius, setGeofenceRadius] = useState(100);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [search, setSearch] = useState('');
+  const [isFormOpen, setFormOpen] = useState(false);
+  const debouncedSearch = useDebounced(search);
 
-  useEffect(() => {
-    async function loadSites() {
-      try {
-        setLoading(true);
-        const data = await sitesApi.getSites();
-        setSites(data || []);
-      } catch (err) {
-        console.error('Error fetching sites:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadSites();
-  }, []);
+  const params = { page, pageSize, q: debouncedSearch || undefined, sort: 'createdAt', order: 'desc' as const };
 
-  const handleCreateSite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const newSite = await sitesApi.createSite({
-        clientName,
-        name: siteName,
-        addressLine,
-        city,
-        latitude: 18.5204,
-        longitude: 73.8567,
-        geofenceRadiusM: Number(geofenceRadius)
-      });
-      setSites((prev) => [newSite, ...prev]);
-      setIsAddModalOpen(false);
-      setSiteName('');
-      setAddressLine('');
-    } catch (err) {
-      console.error('Error creating site:', err);
-    }
-  };
-
-  const filtered = sites.filter(
-    (s) =>
-      s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      s.city.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const sites = useQuery({
+    queryKey: queryKeys.sites(params),
+    queryFn: () => sitesApi.list(params),
+  });
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Title Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="p-1 rounded-lg bg-brand-primary/10 text-brand-primary font-mono text-xs font-bold flex items-center gap-1">
-              <Building2 className="w-4 h-4 text-brand-primary" /> CLIENT SITES & POSTS DIRECTORY
-            </span>
-          </div>
-          <h1 className="text-2xl font-black text-txt-primary tracking-tight mt-1">
-            Sites Directory ({sites.length})
-          </h1>
-        </div>
+      <PageHeader
+        eyebrow="Deployment"
+        eyebrowIcon={<Building2 className="w-3.5 h-3.5" aria-hidden />}
+        title="Sites & posts"
+        description="Each site holds the posts you guard. Shifts and rosters are built beneath them."
+        actions={
+          can('SITE_CREATE') ? (
+            <Button onClick={() => setFormOpen(true)} leftIcon={<Plus className="w-4 h-4" aria-hidden />}>
+              Add site
+            </Button>
+          ) : undefined
+        }
+      />
 
-        <Button
-          onClick={() => setIsAddModalOpen(true)}
-          className="bg-brand-primary hover:bg-brand-primary-600 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md flex items-center gap-1.5"
-        >
-          <Plus className="w-4 h-4" /> Add New Security Site
-        </Button>
-      </div>
+      <SearchInput
+        value={search}
+        onChange={(value) => {
+          setSearch(value);
+          setPage(1);
+        }}
+        placeholder="Search by site name, code, city or address…"
+        className="max-w-md"
+        label="Search sites"
+      />
 
-      {/* Search Bar */}
-      <div className="relative max-w-md">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-txt-secondary" />
-        <input
-          type="text"
-          placeholder="Search site name, client, or city..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-9 pr-4 py-2 bg-bg-surface border border-border rounded-xl text-xs text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50"
+      {sites.isLoading ? (
+        <TableSkeleton rows={4} columns={4} />
+      ) : sites.isError ? (
+        <ErrorState message={describeApiError(sites.error)} onRetry={() => void sites.refetch()} />
+      ) : sites.data!.data.length === 0 ? (
+        <EmptyState
+          icon={Building2}
+          title={debouncedSearch ? 'No sites match that search' : 'No sites yet'}
+          description={
+            debouncedSearch
+              ? 'Try a different name, code or city.'
+              : 'A site is a place you deploy people to. Add one to start building posts, shifts and rosters beneath it.'
+          }
+          action={
+            !debouncedSearch && can('SITE_CREATE')
+              ? { label: 'Add your first site', onClick: () => setFormOpen(true), icon: <Plus className="w-3.5 h-3.5" /> }
+              : undefined
+          }
         />
-      </div>
-
-      {loading && (
-        <div className="flex items-center justify-center p-8 gap-2 text-txt-secondary text-xs">
-          <Loader2 className="w-5 h-5 animate-spin text-brand-primary" /> Syncing site locations from MySQL...
-        </div>
-      )}
-
-      {!loading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((site) => (
-            <div key={site.id} className="bg-bg-surface border border-border rounded-2xl p-5 shadow-sm space-y-3 hover:border-brand-primary/40 transition-all">
-              <div className="flex items-start justify-between">
-                <div>
-                  <span className="text-[10px] font-bold text-brand-primary uppercase font-mono tracking-wider">
-                    {site.clientName}
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {sites.data!.data.map((site) => (
+              <button
+                key={site.id}
+                onClick={() => navigate(`/sites/${site.id}`)}
+                className="text-left bg-bg-surface border border-border rounded-2xl p-5 shadow-sm space-y-3 hover:border-brand-primary/50 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-mono font-bold text-brand-primary uppercase tracking-wide">{site.code}</span>
+                    <h2 className="text-base font-extrabold text-txt-primary leading-tight mt-0.5 truncate">{site.name}</h2>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${
+                      site.isActive ? 'bg-brand-teal/10 text-brand-teal' : 'bg-bg-surface-2 text-txt-secondary'
+                    }`}
+                  >
+                    {site.isActive ? 'Active' : 'Archived'}
                   </span>
-                  <h3 className="text-base font-extrabold text-txt-primary leading-tight mt-0.5">{site.name}</h3>
                 </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">
-                  Active
-                </span>
-              </div>
 
-              <div className="text-xs text-txt-secondary space-y-1 font-medium">
-                <div className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-txt-secondary flex-shrink-0" />
-                  <span className="truncate">{site.addressLine}, {site.city}</span>
+                <div className="text-xs text-txt-secondary space-y-1">
+                  <div className="flex items-start gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" aria-hidden />
+                    <span className="line-clamp-2">
+                      {site.addressLine}, {site.city}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-brand-teal" aria-hidden />
+                    <span>Geofence {site.geofenceRadiusM} m</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-txt-secondary">
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>GPS Geofence Radius: {site.geofenceRadiusM || 100}m</span>
-                </div>
-              </div>
 
-              <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs font-bold">
-                <span className="text-txt-secondary">{site.postsCount || site.posts?.length || 2} Security Posts</span>
-                <span className="text-brand-primary">{site.employeesCount || 10} Guards Assigned</span>
-              </div>
-            </div>
-          ))}
-        </div>
+                <div className="pt-2 border-t border-border/60 flex items-center justify-between text-xs">
+                  <span className="text-txt-secondary">
+                    <span className="font-bold text-txt-primary tabular-nums">{site.postCount}</span> post
+                    {site.postCount === 1 ? '' : 's'}
+                  </span>
+                  <span className="text-txt-secondary">
+                    <span className="font-bold text-txt-primary tabular-nums">{site.guardsRequired}</span> required
+                  </span>
+                  <span className="text-txt-secondary">
+                    <span className="font-bold text-brand-primary tabular-nums">{site.employeeCount}</span> deployed
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-bg-surface border border-border rounded-2xl">
+            <Pagination
+              meta={sites.data!.meta}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(1);
+              }}
+              label="sites"
+            />
+          </div>
+        </>
       )}
 
-      {/* Add Site Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-txt-primary">Add Security Site Location</h3>
-            <form onSubmit={handleCreateSite} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Client Name</label>
-                <input
-                  type="text"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Site Name</label>
-                <input
-                  type="text"
-                  placeholder="e.g. HDFC FC Road Branch"
-                  value={siteName}
-                  onChange={(e) => setSiteName(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Address Line</label>
-                <input
-                  type="text"
-                  placeholder="Street Address"
-                  value={addressLine}
-                  onChange={(e) => setAddressLine(e.target.value)}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-txt-secondary">Geofence Radius (meters)</label>
-                <input
-                  type="number"
-                  value={geofenceRadius}
-                  onChange={(e) => setGeofenceRadius(Number(e.target.value))}
-                  className="w-full mt-1 p-2 bg-bg-surface-2 border border-border rounded-xl text-xs text-txt-primary"
-                  required
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3">
-                <Button type="button" variant="outline" onClick={() => setIsAddModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-brand-primary text-white">
-                  Save Site
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {isFormOpen && (
+        <SiteFormDialog
+          onClose={() => setFormOpen(false)}
+          onSaved={(site: Site) => {
+            setFormOpen(false);
+            toast.success('Site created', `${site.name} was added as ${site.code}.`);
+            void queryClient.invalidateQueries({ queryKey: ['sites'] });
+            void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+            navigate(`/sites/${site.id}`);
+          }}
+        />
       )}
     </div>
   );

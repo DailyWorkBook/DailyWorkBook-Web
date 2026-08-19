@@ -12,7 +12,6 @@ export interface MetricCardProps {
   deltaType?: 'up' | 'down' | 'flat';
   suffix?: string;
   trend?: 'positive-up' | 'positive-down' | 'negative-up' | 'negative-down';
-  accentColor?: string;
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({
@@ -23,7 +22,6 @@ export const MetricCard: React.FC<MetricCardProps> = ({
   deltaValue,
   deltaType = 'up',
   suffix,
-  accentColor = '#2F6BFF'
 }) => {
   const deltaColor =
     deltaType === 'up' ? 'text-status-present' :
