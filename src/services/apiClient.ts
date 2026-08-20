@@ -12,14 +12,46 @@ const API_BASE_URL: string = import.meta.env?.VITE_API_URL ?? 'http://localhost:
 const ACCESS_TOKEN_KEY = 'wt.accessToken';
 const REFRESH_TOKEN_KEY = 'wt.refreshToken';
 
+/**
+ * Session storage, in two scopes.
+ *
+ * An ordinary sign-in goes to `localStorage`, so the session is shared by every
+ * tab and survives a restart — the behaviour people expect.
+ *
+ * A Super Admin bypass session goes to `sessionStorage` instead, which is
+ * per-tab. That is what lets the console open a client's workspace in a new tab
+ * while the operator's own session keeps running, untouched, in the original
+ * one. Reads prefer the tab-scoped token, so a tab that holds a bypass session
+ * always acts as the admin and never accidentally as the operator.
+ */
 export const tokenStore = {
-  getAccess: () => localStorage.getItem(ACCESS_TOKEN_KEY),
-  getRefresh: () => localStorage.getItem(REFRESH_TOKEN_KEY),
+  getAccess: () => sessionStorage.getItem(ACCESS_TOKEN_KEY) ?? localStorage.getItem(ACCESS_TOKEN_KEY),
+  getRefresh: () => sessionStorage.getItem(REFRESH_TOKEN_KEY) ?? localStorage.getItem(REFRESH_TOKEN_KEY),
+
+  /** True when this tab is running a bypass session of its own. */
+  isTabScoped: () => sessionStorage.getItem(ACCESS_TOKEN_KEY) !== null,
+
   set(accessToken: string, refreshToken: string) {
-    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    // Refreshing inside a bypass tab must stay inside that tab.
+    const store = tokenStore.isTabScoped() ? sessionStorage : localStorage;
+    store.setItem(ACCESS_TOKEN_KEY, accessToken);
+    store.setItem(REFRESH_TOKEN_KEY, refreshToken);
   },
+
+  /** Stores a bypass session, visible to this tab only. */
+  setTabScoped(accessToken: string, refreshToken: string) {
+    sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+  },
+
   clear() {
+    // Ending a bypass session clears only this tab; the operator's own session
+    // in localStorage is deliberately left alone.
+    if (tokenStore.isTabScoped()) {
+      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+      return;
+    }
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   },

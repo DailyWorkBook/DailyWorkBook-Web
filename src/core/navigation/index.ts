@@ -58,6 +58,7 @@ export const PLATFORM_NAV: NavDestination[] = [
   { label: 'Clients', path: '/platform/clients', icon: Building2, section: 'PLATFORM', module: '', permission: '' },
   { label: 'Billing & Invoices', path: '/platform/billing', icon: CreditCard, section: 'PLATFORM', module: '', permission: '' },
   { label: 'Activity Log', path: '/platform/activity', icon: ShieldAlert, section: 'PLATFORM', module: '', permission: '' },
+  { label: 'Support Access', path: '/platform/access', icon: KeyRound, section: 'PLATFORM', module: '', permission: '' },
 ];
 
 export const PLATFORM_SECTIONS = ['PLATFORM'] as const;

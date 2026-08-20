@@ -19,6 +19,8 @@ import type {
   EmployeeDetail,
   EmployeeKyc,
   EmployeeSummary,
+  ImpersonationHandoff,
+  ImpersonationSession,
   Invoice,
   LeaveBalance,
   LeaveRequest,
@@ -74,6 +76,20 @@ export const authApi = {
       method: 'POST',
       body: { currentPassword, newPassword },
     }),
+
+  /**
+   * Exchanges a Super Admin bypass ticket for a session. Sent over POST so the
+   * credential never travels in a URL; `skipAuthRetry` because the tab has no
+   * session yet and a 401 here means the ticket is spent, not the session.
+   */
+  redeemImpersonation: (ticket: string) =>
+    apiRequest<Session>('/auth/impersonation/redeem', {
+      method: 'POST',
+      body: { ticket },
+      skipAuthRetry: true,
+    }),
+
+  exitImpersonation: () => apiRequest<{ ended: boolean }>('/auth/impersonation/exit', { method: 'POST' }),
 };
 
 export const catalogApi = {
@@ -125,6 +141,16 @@ export const platformApi = {
     apiRequest<Invoice>(`/superadmin/invoices/${invoiceId}/payments`, { method: 'POST', body }),
 
   audit: (params: ListParams = {}) => apiRequestPaged<PlatformAuditEntry>('/superadmin/audit', { query: params }),
+
+  /**
+   * Opens a bypass session against a client. Returns a single-use ticket, not
+   * a token — the console never holds a credential for someone else's account.
+   */
+  startImpersonation: (clientId: string, body: { reason: string; userId?: string }) =>
+    apiRequest<ImpersonationHandoff>(`/superadmin/clients/${clientId}/impersonate`, { method: 'POST', body }),
+
+  impersonationSessions: (params: ListParams & { clientId?: string; activeOnly?: boolean } = {}) =>
+    apiRequestPaged<ImpersonationSession>('/superadmin/impersonation-sessions', { query: params }),
 };
 
 export const rolesApi = {

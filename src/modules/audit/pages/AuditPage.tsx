@@ -101,7 +101,17 @@ export const AuditPage: React.FC = () => {
                           minute: '2-digit',
                         })}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-txt-primary">{entry.actorName ?? 'System'}</td>
+                      <td className="px-4 py-3 font-semibold text-txt-primary">
+                        {entry.actorName ?? 'System'}
+                        {entry.impersonatedByEmail && (
+                          <span
+                            className="block text-[10px] font-bold text-amber-600 mt-0.5"
+                            title={`Performed by ${entry.impersonatedByEmail} during a support session`}
+                          >
+                            via support · {entry.impersonatedByEmail}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="font-mono text-[10px] px-2 py-0.5 rounded-md bg-bg-surface-2 border border-border text-txt-primary">
                           {entry.action}

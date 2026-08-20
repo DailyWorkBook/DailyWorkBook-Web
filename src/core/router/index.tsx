@@ -27,6 +27,8 @@ const PlatformClientsPage = lazy(() => import('../../modules/platform/pages/Plat
 const PlatformClientDetailPage = lazy(() => import('../../modules/platform/pages/PlatformClientDetailPage').then((m) => ({ default: m.PlatformClientDetailPage })));
 const PlatformBillingPage = lazy(() => import('../../modules/platform/pages/PlatformBillingPage').then((m) => ({ default: m.PlatformBillingPage })));
 const PlatformActivityPage = lazy(() => import('../../modules/platform/pages/PlatformActivityPage').then((m) => ({ default: m.PlatformActivityPage })));
+const PlatformAccessControlPage = lazy(() => import('../../modules/platform/pages/PlatformAccessControlPage').then((m) => ({ default: m.PlatformAccessControlPage })));
+const ImpersonationCallbackPage = lazy(() => import('../../modules/platform/pages/ImpersonationCallbackPage').then((m) => ({ default: m.ImpersonationCallbackPage })));
 
 const RouteFallback = () => <LoadingState label="Loading page…" />;
 
@@ -111,6 +113,17 @@ export const AppRouter: React.FC = () => (
         </Suspense>
       }
     />
+    {/* Deliberately outside every guarded layout: this tab has no session
+        until the ticket is spent, so a guard here would bounce it to /login
+        before it ever had the chance. */}
+    <Route
+      path="/platform/impersonate"
+      element={
+        <Suspense fallback={<RouteFallback />}>
+          <ImpersonationCallbackPage />
+        </Suspense>
+      }
+    />
     <Route path="/no-access" element={<NoAccessPage />} />
     <Route path="/" element={<RootRedirect />} />
 
@@ -137,6 +150,7 @@ export const AppRouter: React.FC = () => (
       <Route path="/platform/clients/:id" element={<PlatformClientDetailPage />} />
       <Route path="/platform/billing" element={<PlatformBillingPage />} />
       <Route path="/platform/activity" element={<PlatformActivityPage />} />
+      <Route path="/platform/access" element={<PlatformAccessControlPage />} />
     </Route>
 
     <Route path="*" element={<Navigate to="/" replace />} />

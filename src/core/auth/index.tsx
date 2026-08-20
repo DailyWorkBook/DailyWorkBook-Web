@@ -1,5 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { ApiError, authApi, setSessionExpiredHandler, tokenStore, type SessionUser } from '../../services';
+import {
+  ApiError,
+  authApi,
+  setSessionExpiredHandler,
+  tokenStore,
+  type ImpersonationBadge,
+  type SessionUser,
+} from '../../services';
 
 /**
  * Session state for the whole app.
@@ -17,6 +24,16 @@ export interface AuthContextValue {
   login: (email: string, password: string) => Promise<SessionUser>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  /** Set while a Super Admin is signed in as this account. */
+  impersonation: ImpersonationBadge | null;
+  isImpersonating: boolean;
+  /**
+   * Spends a bypass ticket and adopts the resulting session *for this tab only*,
+   * which is what keeps the operator signed in as themselves everywhere else.
+   */
+  beginImpersonation: (ticket: string) => Promise<SessionUser>;
+  /** Hands the account back and closes this tab's session. */
+  endImpersonation: () => Promise<void>;
   /** True when the workspace owns the module. Platform operators own none. */
   hasModule: (moduleCode: string) => boolean;
   /** True when the signed-in role grants the permission. */
@@ -76,6 +93,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void refreshUser();
   }, [refreshUser]);
 
+  const beginImpersonation = useCallback(async (ticket: string) => {
+    const session = await authApi.redeemImpersonation(ticket);
+    tokenStore.setTabScoped(session.accessToken, session.refreshToken);
+    setUser(session.user);
+    setStatus('authenticated');
+    return session.user;
+  }, []);
+
+  const endImpersonation = useCallback(async () => {
+    try {
+      await authApi.exitImpersonation();
+    } catch {
+      // The session is being abandoned either way; a failed call here must not
+      // strand the operator in a workspace they can no longer leave.
+    }
+    signOutLocally();
+  }, [signOutLocally]);
+
   const login = useCallback(async (email: string, password: string) => {
     const session = await authApi.login(email, password);
     tokenStore.set(session.accessToken, session.refreshToken);
@@ -102,14 +137,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       status,
       isAuthenticated: status === 'authenticated' && user !== null,
       isSuperAdmin: user?.actorType === 'SUPER_ADMIN',
+      impersonation: user?.impersonation ?? null,
+      isImpersonating: Boolean(user?.impersonation),
       login,
       logout,
       refreshUser,
+      beginImpersonation,
+      endImpersonation,
       hasModule: (moduleCode: string) => modules.has(moduleCode),
       can: (permissionCode: string) => permissions.has(permissionCode),
       canAny: (permissionCodes: string[]) => permissionCodes.some((code) => permissions.has(code)),
     };
-  }, [user, status, login, logout, refreshUser]);
+  }, [user, status, login, logout, refreshUser, beginImpersonation, endImpersonation]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

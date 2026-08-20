@@ -36,6 +36,7 @@ export const queryKeys = {
   platformClient: (id: string) => ['platform', 'client', id] as const,
   platformInvoices: (params: unknown) => ['platform', 'invoices', params] as const,
   platformAudit: (params: unknown) => ['platform', 'audit', params] as const,
+  platformImpersonations: (params: unknown) => ['platform', 'impersonations', params] as const,
 
   dashboard: (date?: string) => ['dashboard', 'overview', date ?? 'today'] as const,
   dashboardTrend: (days: number) => ['dashboard', 'trend', days] as const,

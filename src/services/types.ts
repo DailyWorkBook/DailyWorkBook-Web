@@ -17,6 +17,61 @@ export interface SessionUser {
   permissions: string[];
   modules: string[];
   mustChangePassword: boolean;
+  /** Present only while a Super Admin is signed in as this account. */
+  impersonation?: ImpersonationBadge;
+}
+
+/** What the workspace shows about an active bypass session. */
+export interface ImpersonationBadge {
+  sessionId: string;
+  by: string;
+  byEmail: string;
+  reason: string;
+  expiresAt: string;
+}
+
+export type ImpersonationStatus = 'PENDING' | 'ACTIVE' | 'ENDED' | 'EXPIRED';
+
+/** The one-time handoff returned when an operator opens a bypass session. */
+export interface ImpersonationHandoff {
+  sessionId: string;
+  ticket: string;
+  ticketExpiresIn: number;
+  expiresAt: string;
+  target: {
+    userId: string;
+    name: string;
+    email: string;
+    roleName: string | null;
+    isPrimaryAdmin: boolean;
+    clientId: string;
+    clientName: string;
+    clientCode: string;
+    clientStatus: string;
+  };
+}
+
+/** A row on the bypass audit trail. */
+export interface ImpersonationSession {
+  id: string;
+  superAdminId: string;
+  superAdminName: string;
+  superAdminEmail: string;
+  clientId: string;
+  clientName: string;
+  clientCode: string;
+  targetUserId: string;
+  targetUserName: string;
+  targetUserEmail: string;
+  reason: string;
+  requestedAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  endedReason: string | null;
+  expiresAt: string;
+  ipAddress: string | null;
+  userAgent: string | null;
+  status: ImpersonationStatus;
 }
 
 export interface Session {
@@ -573,6 +628,9 @@ export interface AuditEntry {
   actorId: string | null;
   actorName: string | null;
   actorType: string;
+  /** Set when the action was taken by a platform operator during support access. */
+  impersonatedById: string | null;
+  impersonatedByEmail: string | null;
   before: unknown;
   after: unknown;
   ipAddress: string | null;

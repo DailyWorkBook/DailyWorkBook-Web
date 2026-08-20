@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, CreditCard, KeyRound, Layers, Power } from 'lucide-react';
+import { ArrowLeft, CreditCard, KeyRound, Layers, Power, ShieldAlert } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { ConfirmDialog, PageHeader } from '../../../components/data';
 import { ErrorState, LoadingState } from '../../../components/feedback/States';
@@ -9,6 +9,7 @@ import { queryKeys } from '../../../core/query';
 import { catalogApi, platformApi } from '../../../services';
 import { describeApiError } from '../../../hooks/useApiErrorMessage';
 import { useToast } from '../../../hooks';
+import { openImpersonationTab } from '../impersonation';
 
 const money = (value: number, currency = 'INR') =>
   new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
@@ -23,6 +24,7 @@ export const PlatformClientDetailPage: React.FC = () => {
   const [draftModules, setDraftModules] = useState<string[]>([]);
   const [statusChange, setStatusChange] = useState<'ACTIVE' | 'SUSPENDED' | null>(null);
   const [isResetOpen, setResetOpen] = useState(false);
+  const [isBypassOpen, setBypassOpen] = useState(false);
 
   const client = useQuery({
     queryKey: queryKeys.platformClient(id),
@@ -95,6 +97,11 @@ export const PlatformClientDetailPage: React.FC = () => {
         description={`${data.billingAddress}, ${data.city}${data.state ? `, ${data.state}` : ''}`}
         actions={
           <div className="flex gap-2">
+            {data.primaryAdmin && (
+              <Button variant="outline" onClick={() => setBypassOpen(true)} leftIcon={<ShieldAlert className="w-3.5 h-3.5" aria-hidden />}>
+                Login as admin
+              </Button>
+            )}
             {data.primaryAdmin && (
               <Button variant="outline" onClick={() => setResetOpen(true)} leftIcon={<KeyRound className="w-3.5 h-3.5" aria-hidden />}>
                 Reset admin password
@@ -343,6 +350,29 @@ export const PlatformClientDetailPage: React.FC = () => {
         onCancel={() => setStatusChange(null)}
       />
 
+      {isBypassOpen && data.primaryAdmin && (
+        <BypassLoginDialog
+          clientId={id}
+          clientName={data.name}
+          adminName={data.primaryAdmin.name}
+          adminEmail={data.primaryAdmin.email}
+          onClose={() => setBypassOpen(false)}
+          onOpened={() => {
+            setBypassOpen(false);
+            toast.success(
+              'Support session opened',
+              'The client workspace is open in a new tab. This tab stays signed in as you.',
+            );
+          }}
+          onBlocked={() =>
+            toast.error(
+              'Allow pop-ups to continue',
+              'The workspace opens in a new tab. Allow pop-ups for this site, then try again.',
+            )
+          }
+        />
+      )}
+
       {isResetOpen && data.primaryAdmin && (
         <ResetPasswordDialog
           clientId={id}
@@ -426,6 +456,96 @@ const ResetPasswordDialog: React.FC<ResetPasswordDialogProps> = ({ clientId, use
             </Button>
             <Button type="submit" isLoading={reset.isPending}>
               Reset password
+            </Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface BypassLoginDialogProps {
+  clientId: string;
+  clientName: string;
+  adminName: string;
+  adminEmail: string;
+  onClose: () => void;
+  onOpened: () => void;
+  onBlocked: () => void;
+}
+
+/**
+ * Confirms who is about to be signed in as, and why, before any session exists.
+ *
+ * The reason is not paperwork: it is the only lasting explanation of why this
+ * workspace was entered, so the button stays disabled until there is a real one.
+ */
+const BypassLoginDialog: React.FC<BypassLoginDialogProps> = ({
+  clientId,
+  clientName,
+  adminName,
+  adminEmail,
+  onClose,
+  onOpened,
+  onBlocked,
+}) => {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+
+  const start = useMutation({
+    mutationFn: () => platformApi.startImpersonation(clientId, { reason: reason.trim() }),
+    onSuccess: (handoff) => (openImpersonationTab(handoff.ticket) ? onOpened() : onBlocked()),
+    onError: (caught) => setError(describeApiError(caught)),
+  });
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm" role="dialog" aria-modal="true">
+      <div className="bg-bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+        <div className="border-b border-border pb-3">
+          <h2 className="text-base font-bold text-txt-primary">Sign in as {adminName}</h2>
+          <p className="text-xs text-txt-secondary mt-0.5 break-words">
+            Opens {clientName} in a new tab as {adminEmail}. Their password is neither used nor changed, and they stay
+            signed in on their own devices.
+          </p>
+        </div>
+
+        {error && (
+          <div role="alert" className="p-3 rounded-xl bg-status-absent/10 border border-status-absent/25 text-status-absent text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setError('');
+            start.mutate();
+          }}
+          className="space-y-3"
+        >
+          <label className="block">
+            <span className="block text-xs font-bold text-txt-secondary mb-1">
+              Reason for access <span className="text-status-absent">*</span>
+            </span>
+            <input
+              required
+              minLength={10}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="e.g. Support ticket #4029 — roster sync failing"
+              className="w-full px-3 py-2 min-h-[38px] bg-bg-surface-2 border border-border rounded-xl text-sm text-txt-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/40"
+            />
+            <span className="block text-[11px] text-txt-secondary mt-1">
+              Recorded on the platform audit trail and shown to the client.
+            </span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            <Button type="button" variant="outline" onClick={onClose} disabled={start.isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={start.isPending} disabled={reason.trim().length < 10}>
+              Open session
             </Button>
           </div>
         </form>
